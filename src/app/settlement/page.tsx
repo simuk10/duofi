@@ -29,9 +29,9 @@ export default function SettlementPage() {
   const [error, setError] = useState('');
 
   const { household } = useAuth();
-  const { transactions, loading: txLoading, refetch: refetchTx } = useTransactions({
+  const { transactions, loading: txLoading } = useTransactions({
     householdId: household?.id ?? null,
-    filter: 'all',
+    filter: 'categorized',
   });
   const {
     repayments,
@@ -297,10 +297,9 @@ export default function SettlementPage() {
             {/* Venmo Requests — segmented by person */}
             <div className="mt-6">
               <PendingRequests
-                transactions={transactions}
+                householdId={household?.id ?? null}
                 personAName={household?.person_a_name || 'Person A'}
                 personBName={household?.person_b_name || 'Person B'}
-                onUpdate={refetchTx}
               />
             </div>
           </>

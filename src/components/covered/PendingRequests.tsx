@@ -1,16 +1,15 @@
 'use client';
 
-import { useState, useMemo } from 'react';
+import { useState, useMemo, useEffect, useCallback } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Check, ChevronDown, ChevronUp, ExternalLink, Users } from 'lucide-react';
 import type { Transaction, CoveredSplit, CoveredSplitFriend } from '@/types/database';
 
 interface PendingRequestsProps {
-  transactions: Transaction[];
+  householdId: string | null;
   personAName: string;
   personBName: string;
-  onUpdate?: () => void;
 }
 
 interface FlatRequest {
@@ -37,20 +36,30 @@ function venmoUrl(friend: CoveredSplitFriend, description: string) {
 }
 
 export function PendingRequests({
-  transactions,
+  householdId,
   personAName,
   personBName,
-  onUpdate,
 }: PendingRequestsProps) {
+  const [coveredTxs, setCoveredTxs] = useState<Transaction[]>([]);
   const [showPastByGroup, setShowPastByGroup] = useState<Record<string, boolean>>({});
   const [celebrateKey, setCelebrateKey] = useState<string | null>(null);
 
   const supabase = createClient();
 
-  const coveredTxs = useMemo(
-    () => transactions.filter((tx) => tx.is_covered && tx.covered_split),
-    [transactions]
-  );
+  const fetchCovered = useCallback(async () => {
+    if (!householdId) return;
+    const { data } = await supabase
+      .from('transactions')
+      .select('id, description, date, paid_by, budget_owner, covered_split')
+      .eq('household_id', householdId)
+      .eq('is_covered', true)
+      .not('covered_split', 'is', null);
+    if (data) setCoveredTxs(data as unknown as Transaction[]);
+  }, [householdId, supabase]);
+
+  useEffect(() => {
+    fetchCovered();
+  }, [fetchCovered]);
 
   const grouped = useMemo(() => {
     const groups: Record<string, GroupedRequests> = {
@@ -84,7 +93,7 @@ export function PendingRequests({
     );
 
   const toggleStatus = async (req: FlatRequest) => {
-    const tx = transactions.find((t) => t.id === req.transactionId);
+    const tx = coveredTxs.find((t) => t.id === req.transactionId);
     if (!tx?.covered_split) return;
 
     const newSplit: CoveredSplit = {
@@ -103,7 +112,7 @@ export function PendingRequests({
       .update({ covered_split: newSplit as unknown as Record<string, unknown> })
       .eq('id', req.transactionId);
 
-    onUpdate?.();
+    await fetchCovered();
 
     if (allNowSent) {
       setCelebrateKey(req.transactionId);

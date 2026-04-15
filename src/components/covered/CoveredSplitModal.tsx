@@ -42,21 +42,38 @@ export function CoveredSplitModal({
   const [editValue, setEditValue] = useState('');
   const [error, setError] = useState('');
 
-  const totalAmount = transaction.amount;
+  const existingSplit = transaction.covered_split;
+  const totalAmount = existingSplit ? existingSplit.originalAmount : transaction.amount;
   const savedFriends = useMemo(() => getSavedFriends(), []);
 
   useEffect(() => {
     if (isOpen) {
-      setStep(1);
-      setFriendCount(1);
-      setFriendNames(['']);
-      setSplitType('even');
-      setItems([{ description: '', amount: '', assignedTo: '' }]);
       setEditingIdx(null);
       setEditValue('');
       setError('');
+
+      if (existingSplit) {
+        const names = existingSplit.friends.map((f) => f.name);
+        setFriendCount(names.length);
+        setFriendNames(names);
+        setSplitType(existingSplit.splitType);
+        setItems(
+          existingSplit.friends.map((f) => ({
+            description: f.name,
+            amount: f.amount.toFixed(2),
+            assignedTo: f.name,
+          }))
+        );
+        setStep(1);
+      } else {
+        setStep(1);
+        setFriendCount(1);
+        setFriendNames(['']);
+        setSplitType('even');
+        setItems([{ description: '', amount: '', assignedTo: '' }]);
+      }
     }
-  }, [isOpen]);
+  }, [isOpen, existingSplit]);
 
   const allPeople = [userName, ...friendNames.filter((n) => n.trim())];
   const evenShare = allPeople.length > 0 ? totalAmount / allPeople.length : 0;

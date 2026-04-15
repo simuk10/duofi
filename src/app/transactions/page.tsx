@@ -55,6 +55,11 @@ function TransactionsPageContent() {
   const [newTagInput, setNewTagInput] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
   const [showCoveredModal, setShowCoveredModal] = useState(false);
+  const [pendingSplitAction, setPendingSplitAction] = useState<
+    | { type: 'set'; split: CoveredSplit; newAmount: number }
+    | { type: 'remove'; originalAmount: number }
+    | null
+  >(null);
 
   const { household, profile } = useAuth();
   const currentUserName =
@@ -227,6 +232,7 @@ function TransactionsPageContent() {
     setModalTagIds(tx.tags?.map((t) => t.id) ?? []);
     setNewTagInput('');
     setSaveError('');
+    setPendingSplitAction(null);
   };
 
   const handleAddNewTagInModal = async () => {
@@ -256,18 +262,32 @@ function TransactionsPageContent() {
     setSaving(true);
     setSaveError('');
     try {
-      await updateTransaction(selectedTransaction.id, {
+      const updates: Parameters<typeof updateTransaction>[1] = {
         category_id: categoryId,
         budget_owner: budgetOwner as BudgetOwner,
         amount: parsedAmount,
         notes: notesInput.trim() === '' ? null : notesInput.trim(),
-      });
+      };
+
+      if (pendingSplitAction?.type === 'set') {
+        updates.amount = pendingSplitAction.newAmount;
+        updates.is_covered = true;
+        updates.covered_split = pendingSplitAction.split;
+        addSavedFriends(pendingSplitAction.split.friends.map((f) => f.name));
+      } else if (pendingSplitAction?.type === 'remove') {
+        updates.amount = pendingSplitAction.originalAmount;
+        updates.is_covered = false;
+        updates.covered_split = null;
+      }
+
+      await updateTransaction(selectedTransaction.id, updates);
       await replaceTransactionTags(selectedTransaction.id, modalTagIds);
       if (globalSearch.trim()) {
         void refetchSearchTransactions();
       }
       setSelectedTransaction(null);
       setNewTagInput('');
+      setPendingSplitAction(null);
     } catch (error) {
       console.error('Failed to update transaction:', error);
       setSaveError('Could not save changes. Try again.');
@@ -810,16 +830,109 @@ function TransactionsPageContent() {
               <p className="text-sm text-[#EF4444]">{saveError}</p>
             )}
 
-            {!selectedTransaction.is_covered && (
-              <button
-                type="button"
-                onClick={() => setShowCoveredModal(true)}
-                className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#14B8A6] bg-white px-4 py-2.5 text-sm font-medium text-[#14B8A6] transition-colors hover:bg-teal-50"
-              >
-                <Users className="h-4 w-4" />
-                I Covered This
-              </button>
-            )}
+            {(() => {
+              const activeSplit =
+                pendingSplitAction?.type === 'set'
+                  ? pendingSplitAction.split
+                  : pendingSplitAction?.type === 'remove'
+                    ? null
+                    : selectedTransaction.covered_split;
+              const isCovered =
+                pendingSplitAction?.type === 'set'
+                  ? true
+                  : pendingSplitAction?.type === 'remove'
+                    ? false
+                    : selectedTransaction.is_covered;
+
+              if (isCovered && activeSplit) {
+                return (
+                  <div className="rounded-xl border border-teal-200 bg-teal-50/50 p-4 space-y-3">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <Users className="h-4 w-4 text-[#0D9488]" />
+                        <span className="text-sm font-semibold text-gray-900">
+                          Group Split
+                          {pendingSplitAction && (
+                            <span className="ml-1.5 text-xs font-normal text-amber-600">
+                              (unsaved)
+                            </span>
+                          )}
+                        </span>
+                      </div>
+                      <span className="text-xs text-gray-500">
+                        Original: {formatCurrency(activeSplit.originalAmount)}
+                      </span>
+                    </div>
+                    <div className="divide-y divide-teal-100">
+                      <div className="flex justify-between py-1.5 text-sm">
+                        <span className="text-gray-700">{currentUserName || 'You'} (you)</span>
+                        <span className="font-medium text-gray-900">
+                          {formatCurrency(activeSplit.myShare)}
+                        </span>
+                      </div>
+                      {activeSplit.friends.map((f) => (
+                        <div key={f.name} className="flex justify-between py-1.5 text-sm">
+                          <span className="text-gray-700">{f.name}</span>
+                          <span className="font-medium text-gray-900">
+                            {formatCurrency(f.amount)}
+                          </span>
+                        </div>
+                      ))}
+                    </div>
+                    <div className="flex gap-2 pt-1">
+                      <button
+                        type="button"
+                        onClick={() => setShowCoveredModal(true)}
+                        className="flex-1 rounded-lg border border-[#14B8A6] bg-white px-3 py-2 text-xs font-medium text-[#14B8A6] transition-colors hover:bg-teal-50"
+                      >
+                        Edit Split
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          const original = activeSplit.originalAmount;
+                          setPendingSplitAction({ type: 'remove', originalAmount: original });
+                          setAmountInput(String(original));
+                        }}
+                        className="flex-1 rounded-lg border border-red-300 bg-white px-3 py-2 text-xs font-medium text-red-600 transition-colors hover:bg-red-50"
+                      >
+                        Remove Split
+                      </button>
+                    </div>
+                  </div>
+                );
+              }
+
+              return (
+                <>
+                  {pendingSplitAction?.type === 'remove' && (
+                    <div className="flex items-center justify-between rounded-xl border border-amber-200 bg-amber-50/60 px-4 py-3">
+                      <p className="text-xs text-amber-800">
+                        Group split will be removed on save
+                      </p>
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setPendingSplitAction(null);
+                          setAmountInput(String(selectedTransaction.amount));
+                        }}
+                        className="text-xs font-medium text-amber-700 hover:underline"
+                      >
+                        Undo
+                      </button>
+                    </div>
+                  )}
+                  <button
+                    type="button"
+                    onClick={() => setShowCoveredModal(true)}
+                    className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#14B8A6] bg-white px-4 py-2.5 text-sm font-medium text-[#14B8A6] transition-colors hover:bg-teal-50"
+                  >
+                    <Users className="h-4 w-4" />
+                    I Covered This
+                  </button>
+                </>
+              );
+            })()}
 
             <div className="flex gap-3 pt-2">
               <Button
@@ -850,21 +963,28 @@ function TransactionsPageContent() {
         <CoveredSplitModal
           isOpen={showCoveredModal}
           onClose={() => setShowCoveredModal(false)}
-          transaction={selectedTransaction}
+          transaction={
+            pendingSplitAction?.type === 'set'
+              ? {
+                  ...selectedTransaction,
+                  is_covered: true,
+                  covered_split: pendingSplitAction.split,
+                  amount: pendingSplitAction.newAmount,
+                }
+              : pendingSplitAction?.type === 'remove'
+                ? {
+                    ...selectedTransaction,
+                    is_covered: false,
+                    covered_split: null,
+                    amount: pendingSplitAction.originalAmount,
+                  }
+                : selectedTransaction
+          }
           userName={currentUserName || 'You'}
-          onConfirm={async (split: CoveredSplit, newAmount: number) => {
-            try {
-              await updateTransaction(selectedTransaction.id, {
-                amount: newAmount,
-                is_covered: true,
-                covered_split: split,
-              });
-              addSavedFriends(split.friends.map((f) => f.name));
-              setShowCoveredModal(false);
-              setSelectedTransaction(null);
-            } catch (err) {
-              console.error('Failed to save covered split:', err);
-            }
+          onConfirm={(split: CoveredSplit, newAmount: number) => {
+            setPendingSplitAction({ type: 'set', split, newAmount });
+            setAmountInput(String(newAmount));
+            setShowCoveredModal(false);
           }}
         />
       )}

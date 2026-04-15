@@ -29,9 +29,9 @@ export default function SettlementPage() {
   const [error, setError] = useState('');
 
   const { household } = useAuth();
-  const { transactions, loading: txLoading } = useTransactions({
+  const { transactions, loading: txLoading, refetch: refetchTx } = useTransactions({
     householdId: household?.id ?? null,
-    filter: 'categorized',
+    filter: 'all',
   });
   const {
     repayments,
@@ -140,8 +140,6 @@ export default function SettlementPage() {
           </div>
         ) : (
           <>
-            <PendingRequests householdId={household?.id ?? null} />
-
             {/* Hero Balance Card */}
             <Card className="p-6 mb-4">
               <div className="flex items-center justify-center mb-6">
@@ -295,6 +293,16 @@ export default function SettlementPage() {
                 </div>
               </div>
             </Card>
+
+            {/* Venmo Requests — segmented by person */}
+            <div className="mt-6">
+              <PendingRequests
+                transactions={transactions}
+                personAName={household?.person_a_name || 'Person A'}
+                personBName={household?.person_b_name || 'Person B'}
+                onUpdate={refetchTx}
+              />
+            </div>
           </>
         )}
       </div>

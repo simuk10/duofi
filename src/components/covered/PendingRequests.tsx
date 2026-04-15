@@ -2,13 +2,15 @@
 
 import { useState, useMemo } from 'react';
 import { createClient } from '@/lib/supabase/client';
-import { useTransactions } from '@/hooks';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import { Check, ChevronDown, ChevronUp, ExternalLink, Users } from 'lucide-react';
-import type { CoveredSplit, CoveredSplitFriend } from '@/types/database';
+import type { Transaction, CoveredSplit, CoveredSplitFriend } from '@/types/database';
 
 interface PendingRequestsProps {
-  householdId: string | null;
+  transactions: Transaction[];
+  personAName: string;
+  personBName: string;
+  onUpdate?: () => void;
 }
 
 interface FlatRequest {
@@ -19,14 +21,29 @@ interface FlatRequest {
   friend: CoveredSplitFriend;
 }
 
-export function PendingRequests({ householdId }: PendingRequestsProps) {
-  const [showPast, setShowPast] = useState(false);
-  const [celebrateKey, setCelebrateKey] = useState<string | null>(null);
+interface GroupedRequests {
+  pending: FlatRequest[];
+  completed: FlatRequest[];
+}
 
-  const { transactions, refetch } = useTransactions({
-    householdId,
-    filter: 'all',
+function venmoUrl(friend: CoveredSplitFriend, description: string) {
+  const params = new URLSearchParams({
+    txn: 'charge',
+    recipients: friend.name,
+    amount: friend.amount.toFixed(2),
+    note: description,
   });
+  return `venmo://paycharge?${params.toString()}`;
+}
+
+export function PendingRequests({
+  transactions,
+  personAName,
+  personBName,
+  onUpdate,
+}: PendingRequestsProps) {
+  const [showPastByGroup, setShowPastByGroup] = useState<Record<string, boolean>>({});
+  const [celebrateKey, setCelebrateKey] = useState<string | null>(null);
 
   const supabase = createClient();
 
@@ -35,11 +52,16 @@ export function PendingRequests({ householdId }: PendingRequestsProps) {
     [transactions]
   );
 
-  const { pending, completed } = useMemo(() => {
-    const p: FlatRequest[] = [];
-    const c: FlatRequest[] = [];
+  const grouped = useMemo(() => {
+    const groups: Record<string, GroupedRequests> = {
+      person_a: { pending: [], completed: [] },
+      person_b: { pending: [], completed: [] },
+      joint: { pending: [], completed: [] },
+    };
     for (const tx of coveredTxs) {
       const split = tx.covered_split!;
+      const owner = tx.budget_owner || 'joint';
+      const bucket = groups[owner] ?? groups.joint;
       split.friends.forEach((friend, idx) => {
         const item: FlatRequest = {
           transactionId: tx.id,
@@ -48,16 +70,18 @@ export function PendingRequests({ householdId }: PendingRequestsProps) {
           friendIdx: idx,
           friend,
         };
-        if (friend.status === 'pending') p.push(item);
-        else c.push(item);
+        if (friend.status === 'pending') bucket.pending.push(item);
+        else bucket.completed.push(item);
       });
     }
-    return { pending: p, completed: c };
+    return groups;
   }, [coveredTxs]);
 
-  const totalRequests = pending.length + completed.length;
-  const sentCount = completed.length;
-  const allSent = totalRequests > 0 && pending.length === 0;
+  const totalAll =
+    Object.values(grouped).reduce(
+      (s, g) => s + g.pending.length + g.completed.length,
+      0
+    );
 
   const toggleStatus = async (req: FlatRequest) => {
     const tx = transactions.find((t) => t.id === req.transactionId);
@@ -67,7 +91,7 @@ export function PendingRequests({ householdId }: PendingRequestsProps) {
       ...tx.covered_split,
       friends: tx.covered_split.friends.map((f, i) =>
         i === req.friendIdx
-          ? { ...f, status: f.status === 'pending' ? 'sent' as const : 'pending' as const }
+          ? { ...f, status: f.status === 'pending' ? ('sent' as const) : ('pending' as const) }
           : f
       ),
     };
@@ -79,7 +103,7 @@ export function PendingRequests({ householdId }: PendingRequestsProps) {
       .update({ covered_split: newSplit as unknown as Record<string, unknown> })
       .eq('id', req.transactionId);
 
-    await refetch();
+    onUpdate?.();
 
     if (allNowSent) {
       setCelebrateKey(req.transactionId);
@@ -87,158 +111,187 @@ export function PendingRequests({ householdId }: PendingRequestsProps) {
     }
   };
 
-  const venmoUrl = (friend: CoveredSplitFriend, description: string) => {
-    const params = new URLSearchParams({
-      txn: 'charge',
-      recipients: friend.name,
-      amount: friend.amount.toFixed(2),
-      note: description,
-    });
-    return `venmo://paycharge?${params.toString()}`;
-  };
+  if (totalAll === 0) return null;
 
-  const venmoFallback = 'https://venmo.com/';
-
-  if (totalRequests === 0) return null;
+  const groupOrder: { key: string; label: string }[] = [
+    { key: 'person_a', label: `${personAName}'s Requests` },
+    { key: 'person_b', label: `${personBName}'s Requests` },
+    { key: 'joint', label: 'Joint Requests' },
+  ];
 
   return (
-    <div className="space-y-3">
-      {/* Pending section */}
-      {allSent && celebrateKey ? (
-        <div className="rounded-2xl border border-teal-200 bg-teal-50 p-6 text-center">
-          <div className="mx-auto mb-3 flex h-14 w-14 items-center justify-center rounded-full bg-[#14B8A6] animate-[celebrate_0.6s_ease-out]">
-            <Check className="h-7 w-7 text-white" />
-          </div>
-          <p className="text-base font-semibold text-gray-900">All caught up!</p>
-          <p className="mt-1 text-sm text-gray-600">
-            All Venmo requests have been sent.
-          </p>
+    <div className="space-y-4">
+      {/* Section header with divider */}
+      <div className="flex items-center gap-3 pt-2">
+        <div className="h-px flex-1 bg-gray-200" />
+        <div className="flex items-center gap-1.5 text-[#14B8A6]">
+          <Users className="h-4 w-4" />
+          <span className="text-xs font-semibold uppercase tracking-wider">
+            Venmo Requests
+          </span>
         </div>
-      ) : allSent ? (
-        <div className="rounded-2xl border border-gray-200 bg-white p-4 text-center">
-          <p className="text-sm font-medium text-[#0D9488]">
-            All caught up! All Venmo requests sent.
-          </p>
-        </div>
-      ) : (
-        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-          <div className="px-4 pt-4 pb-3">
-            <div className="mb-2 flex items-center justify-between">
-              <div className="flex items-center gap-2">
-                <Users className="h-4 w-4 text-[#14B8A6]" />
-                <h3 className="text-sm font-semibold text-gray-900">
-                  Pending Requests
-                </h3>
-              </div>
-              <span className="text-xs text-gray-500">
-                {sentCount} of {totalRequests} sent
-              </span>
-            </div>
-            {/* Progress bar */}
-            <div className="h-2 w-full overflow-hidden rounded-full bg-gray-100">
-              <div
-                className="h-full rounded-full bg-[#14B8A6] transition-all duration-500"
-                style={{
-                  width: `${totalRequests > 0 ? (sentCount / totalRequests) * 100 : 0}%`,
-                }}
-              />
-            </div>
-          </div>
+        <div className="h-px flex-1 bg-gray-200" />
+      </div>
 
-          <div className="divide-y divide-gray-100">
-            {pending.map((req) => (
-              <div
-                key={`${req.transactionId}-${req.friendIdx}`}
-                className="flex items-center gap-3 px-4 py-3"
-              >
+      {celebrateKey && (
+        <div className="rounded-2xl border border-teal-200 bg-teal-50 p-5 text-center">
+          <div className="mx-auto mb-2 flex h-12 w-12 items-center justify-center rounded-full bg-[#14B8A6] animate-[celebrate_0.6s_ease-out]">
+            <Check className="h-6 w-6 text-white" />
+          </div>
+          <p className="text-sm font-semibold text-gray-900">All caught up!</p>
+          <p className="mt-0.5 text-xs text-gray-600">
+            All Venmo requests for this tab have been sent.
+          </p>
+        </div>
+      )}
+
+      {groupOrder.map(({ key, label }) => {
+        const group = grouped[key];
+        const pendingCount = group.pending.length;
+        const completedCount = group.completed.length;
+        const total = pendingCount + completedCount;
+        if (total === 0) return null;
+
+        const allSent = pendingCount === 0;
+        const showPast = showPastByGroup[key] ?? false;
+
+        return (
+          <div
+            key={key}
+            className="rounded-2xl border border-gray-200 bg-white overflow-hidden"
+          >
+            {/* Group header */}
+            <div className="px-4 pt-4 pb-3">
+              <div className="mb-2 flex items-center justify-between">
+                <h3 className="text-sm font-semibold text-gray-900">{label}</h3>
+                <span className="text-xs text-gray-500">
+                  {completedCount} of {total} sent
+                </span>
+              </div>
+              <div className="h-1.5 w-full overflow-hidden rounded-full bg-gray-100">
+                <div
+                  className="h-full rounded-full bg-[#14B8A6] transition-all duration-500"
+                  style={{
+                    width: `${total > 0 ? (completedCount / total) * 100 : 0}%`,
+                  }}
+                />
+              </div>
+            </div>
+
+            {allSent ? (
+              <div className="px-4 pb-4">
+                <p className="text-center text-xs font-medium text-[#0D9488]">
+                  All sent ✓
+                </p>
+              </div>
+            ) : (
+              <div className="divide-y divide-gray-100">
+                {group.pending.map((req) => (
+                  <div
+                    key={`${req.transactionId}-${req.friendIdx}`}
+                    className="flex items-center gap-3 px-4 py-3"
+                  >
+                    <button
+                      type="button"
+                      onClick={() => void toggleStatus(req)}
+                      className="flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 border-gray-300 transition-colors hover:border-[#14B8A6]"
+                      aria-label={`Mark ${req.friend.name} as sent`}
+                    />
+                    <div className="min-w-0 flex-1">
+                      <p className="text-sm font-medium text-gray-900">
+                        {req.friend.name}
+                      </p>
+                      <p className="truncate text-xs text-gray-500">
+                        {req.transactionDescription} ·{' '}
+                        {formatDate(req.transactionDate)}
+                      </p>
+                    </div>
+                    <span className="shrink-0 text-sm font-semibold text-gray-900">
+                      {formatCurrency(req.friend.amount)}
+                    </span>
+                    <a
+                      href={venmoUrl(req.friend, req.transactionDescription)}
+                      onClick={() => {
+                        setTimeout(() => {
+                          window.location.href = 'https://venmo.com/';
+                        }, 1500);
+                      }}
+                      className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#14B8A6]/10 text-[#14B8A6] transition-colors hover:bg-[#14B8A6]/20"
+                      aria-label={`Open Venmo for ${req.friend.name}`}
+                    >
+                      <ExternalLink className="h-3.5 w-3.5" />
+                    </a>
+                  </div>
+                ))}
+              </div>
+            )}
+
+            {/* Past requests for this group */}
+            {completedCount > 0 && (
+              <>
                 <button
                   type="button"
-                  onClick={() => void toggleStatus(req)}
-                  className="flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 border-gray-300 transition-colors hover:border-[#14B8A6]"
-                  aria-label={`Mark ${req.friend.name} as sent`}
-                />
-                <div className="min-w-0 flex-1">
-                  <p className="text-sm font-medium text-gray-900">
-                    {req.friend.name}
-                  </p>
-                  <p className="truncate text-xs text-gray-500">
-                    {req.transactionDescription} · {formatDate(req.transactionDate)}
-                  </p>
-                </div>
-                <span className="shrink-0 text-sm font-semibold text-gray-900">
-                  {formatCurrency(req.friend.amount)}
-                </span>
-                <a
-                  href={venmoUrl(req.friend, req.transactionDescription)}
-                  onClick={(e) => {
-                    setTimeout(() => {
-                      window.location.href = venmoFallback;
-                    }, 1500);
-                  }}
-                  className="flex h-8 w-8 shrink-0 items-center justify-center rounded-lg bg-[#14B8A6]/10 text-[#14B8A6] transition-colors hover:bg-[#14B8A6]/20"
-                  aria-label={`Open Venmo for ${req.friend.name}`}
+                  onClick={() =>
+                    setShowPastByGroup((prev) => ({ ...prev, [key]: !showPast }))
+                  }
+                  className="flex w-full items-center justify-between border-t border-gray-100 px-4 py-2.5 text-xs font-medium text-gray-500 hover:bg-gray-50"
                 >
-                  <ExternalLink className="h-3.5 w-3.5" />
-                </a>
-              </div>
-            ))}
-          </div>
-        </div>
-      )}
-
-      {/* Past requests collapsible */}
-      {completed.length > 0 && (
-        <div className="rounded-2xl border border-gray-200 bg-white overflow-hidden">
-          <button
-            type="button"
-            onClick={() => setShowPast(!showPast)}
-            className="flex w-full items-center justify-between px-4 py-3 text-sm font-medium text-gray-600 hover:bg-gray-50"
-          >
-            <span>Past Requests ({completed.length})</span>
-            {showPast ? (
-              <ChevronUp className="h-4 w-4" />
-            ) : (
-              <ChevronDown className="h-4 w-4" />
-            )}
-          </button>
-          {showPast && (
-            <div className="divide-y divide-gray-100 border-t border-gray-100">
-              {completed.map((req) => (
-                <div
-                  key={`${req.transactionId}-${req.friendIdx}`}
-                  className="flex items-center gap-3 px-4 py-3 opacity-60"
-                >
-                  <button
-                    type="button"
-                    onClick={() => void toggleStatus(req)}
-                    className="flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 border-[#14B8A6] bg-[#14B8A6] transition-colors"
-                    aria-label={`Unmark ${req.friend.name}`}
-                  >
-                    <Check className="h-3 w-3 text-white" />
-                  </button>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900 line-through">
-                      {req.friend.name}
-                    </p>
-                    <p className="truncate text-xs text-gray-500">
-                      {req.transactionDescription}
-                    </p>
+                  <span>Past ({completedCount})</span>
+                  {showPast ? (
+                    <ChevronUp className="h-3.5 w-3.5" />
+                  ) : (
+                    <ChevronDown className="h-3.5 w-3.5" />
+                  )}
+                </button>
+                {showPast && (
+                  <div className="divide-y divide-gray-100">
+                    {group.completed.map((req) => (
+                      <div
+                        key={`${req.transactionId}-${req.friendIdx}`}
+                        className="flex items-center gap-3 px-4 py-2.5 opacity-50"
+                      >
+                        <button
+                          type="button"
+                          onClick={() => void toggleStatus(req)}
+                          className="flex h-5 w-5 shrink-0 items-center justify-center rounded border-2 border-[#14B8A6] bg-[#14B8A6] transition-colors"
+                          aria-label={`Unmark ${req.friend.name}`}
+                        >
+                          <Check className="h-3 w-3 text-white" />
+                        </button>
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-gray-900 line-through">
+                            {req.friend.name}
+                          </p>
+                          <p className="truncate text-xs text-gray-500">
+                            {req.transactionDescription}
+                          </p>
+                        </div>
+                        <span className="shrink-0 text-sm text-gray-500">
+                          {formatCurrency(req.friend.amount)}
+                        </span>
+                      </div>
+                    ))}
                   </div>
-                  <span className="shrink-0 text-sm text-gray-500">
-                    {formatCurrency(req.friend.amount)}
-                  </span>
-                </div>
-              ))}
-            </div>
-          )}
-        </div>
-      )}
+                )}
+              </>
+            )}
+          </div>
+        );
+      })}
 
       <style jsx>{`
         @keyframes celebrate {
-          0% { transform: scale(0); opacity: 0; }
-          50% { transform: scale(1.2); }
-          100% { transform: scale(1); opacity: 1; }
+          0% {
+            transform: scale(0);
+            opacity: 0;
+          }
+          50% {
+            transform: scale(1.2);
+          }
+          100% {
+            transform: scale(1);
+            opacity: 1;
+          }
         }
       `}</style>
     </div>

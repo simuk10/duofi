@@ -8,6 +8,7 @@ import {
   Input,
   Modal,
 } from '@/components/ui';
+import { PendingRequests } from '@/components/covered/PendingRequests';
 import { useAuth, useTransactions, useRepayments } from '@/hooks';
 import { calculateSettlement } from '@/lib/settlement';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -139,6 +140,8 @@ export default function SettlementPage() {
           </div>
         ) : (
           <>
+            <PendingRequests householdId={household?.id ?? null} />
+
             {/* Hero Balance Card */}
             <Card className="p-6 mb-4">
               <div className="flex items-center justify-center mb-6">

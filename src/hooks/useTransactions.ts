@@ -3,7 +3,7 @@
 import { useState, useEffect, useCallback, useRef } from 'react';
 import { createClient } from '@/lib/supabase/client';
 import { useRealtime } from './useRealtime';
-import type { Transaction, BudgetOwner, PaidBy, Tag } from '@/types/database';
+import type { Transaction, BudgetOwner, PaidBy, Tag, CoveredSplit } from '@/types/database';
 import {
   mapBudgetTypeToBudgetOwner,
   type ParsedCategorizedTransaction,
@@ -268,6 +268,8 @@ export function useTransactions({
         budget_owner?: BudgetOwner | null;
         notes?: string | null;
         amount?: number;
+        is_covered?: boolean;
+        covered_split?: CoveredSplit | null;
       }
     ) => {
       let cur = transactions.find((t) => t.id === id);

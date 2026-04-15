@@ -26,9 +26,11 @@ import {
   buildLearnedCategorySuggestions,
   getLearnedSuggestion,
 } from '@/lib/category-suggestions';
-import { ChevronDown, Lightbulb, Search, Upload, X } from 'lucide-react';
+import { CoveredSplitModal } from '@/components/covered/CoveredSplitModal';
+import { addSavedFriends } from '@/lib/saved-friends';
+import { ChevronDown, Lightbulb, Search, Upload, Users, X } from 'lucide-react';
 import Link from 'next/link';
-import type { Transaction, BudgetOwner } from '@/types/database';
+import type { Transaction, BudgetOwner, CoveredSplit } from '@/types/database';
 
 type FilterType = 'all' | 'categorized' | 'uncategorized';
 
@@ -52,8 +54,13 @@ function TransactionsPageContent() {
   const [modalTagIds, setModalTagIds] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
+  const [showCoveredModal, setShowCoveredModal] = useState(false);
 
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
+  const currentUserName =
+    profile?.role === 'person_b'
+      ? household?.person_b_name
+      : household?.person_a_name;
   const { tags: householdTags, createTag } = useTags({
     householdId: household?.id ?? null,
   });
@@ -443,9 +450,15 @@ function TransactionsPageContent() {
           />
         </div>
       </div>
-      {tx.tags && tx.tags.length > 0 && (
+      {(tx.is_covered || (tx.tags && tx.tags.length > 0)) && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
-          {tx.tags.slice(0, 5).map((tag) => (
+          {tx.is_covered && (
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-teal-200/90 bg-teal-50/70 px-2 py-0.5 text-[10px] font-medium text-[#0D9488]">
+              <Users className="h-2.5 w-2.5" />
+              group split
+            </span>
+          )}
+          {tx.tags?.slice(0, 5).map((tag) => (
             <span
               key={tag.id}
               className="rounded-full border border-teal-200/90 bg-teal-50/70 px-2 py-0.5 text-[10px] font-medium text-[#0D9488]"
@@ -453,7 +466,7 @@ function TransactionsPageContent() {
               {tag.name}
             </span>
           ))}
-          {tx.tags.length > 5 && (
+          {tx.tags && tx.tags.length > 5 && (
             <span className="text-[10px] text-gray-500">+{tx.tags.length - 5}</span>
           )}
         </div>
@@ -797,6 +810,17 @@ function TransactionsPageContent() {
               <p className="text-sm text-[#EF4444]">{saveError}</p>
             )}
 
+            {!selectedTransaction.is_covered && (
+              <button
+                type="button"
+                onClick={() => setShowCoveredModal(true)}
+                className="flex w-full items-center justify-center gap-2 rounded-xl border-2 border-[#14B8A6] bg-white px-4 py-2.5 text-sm font-medium text-[#14B8A6] transition-colors hover:bg-teal-50"
+              >
+                <Users className="h-4 w-4" />
+                I Covered This
+              </button>
+            )}
+
             <div className="flex gap-3 pt-2">
               <Button
                 variant="outline"
@@ -821,6 +845,29 @@ function TransactionsPageContent() {
           </div>
         )}
       </Modal>
+
+      {selectedTransaction && (
+        <CoveredSplitModal
+          isOpen={showCoveredModal}
+          onClose={() => setShowCoveredModal(false)}
+          transaction={selectedTransaction}
+          userName={currentUserName || 'You'}
+          onConfirm={async (split: CoveredSplit, newAmount: number) => {
+            try {
+              await updateTransaction(selectedTransaction.id, {
+                amount: newAmount,
+                is_covered: true,
+                covered_split: split,
+              });
+              addSavedFriends(split.friends.map((f) => f.name));
+              setShowCoveredModal(false);
+              setSelectedTransaction(null);
+            } catch (err) {
+              console.error('Failed to save covered split:', err);
+            }
+          }}
+        />
+      )}
     </AppLayout>
   );
 }

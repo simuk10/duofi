@@ -57,6 +57,19 @@ export interface Tag {
   created_at: string;
 }
 
+export interface CoveredSplitFriend {
+  name: string;
+  amount: number;
+  status: 'pending' | 'sent';
+}
+
+export interface CoveredSplit {
+  originalAmount: number;
+  myShare: number;
+  splitType: 'even' | 'itemized';
+  friends: CoveredSplitFriend[];
+}
+
 export interface Transaction {
   id: string;
   date: string;
@@ -67,6 +80,8 @@ export interface Transaction {
   category_id: string | null;
   budget_owner: BudgetOwner | null;
   is_categorized: boolean;
+  is_covered: boolean;
+  covered_split: CoveredSplit | null;
   notes: string | null;
   household_id: string;
   created_at: string;

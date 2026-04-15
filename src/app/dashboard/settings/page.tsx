@@ -3,6 +3,7 @@
 import { useState, useEffect } from 'react';
 import { AppLayout } from '@/components/layout';
 import { AllCategoriesSection } from '@/components/settings/AllCategoriesSection';
+import { ManageFriends } from '@/components/settings/ManageFriends';
 import {
   Card,
   Button,
@@ -127,6 +128,11 @@ export default function SettingsPage() {
           </Card>
 
           <AllCategoriesSection />
+
+          {/* Manage Split Friends */}
+          <Card className="p-5">
+            <ManageFriends />
+          </Card>
 
           {/* Household Settings */}
           <Card className="p-5">

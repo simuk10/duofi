@@ -1,11 +1,11 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { Modal } from '@/components/ui/Modal';
 import { Button, Input } from '@/components/ui';
 import { getSavedFriends } from '@/lib/saved-friends';
 import { formatCurrency } from '@/lib/utils';
-import { Minus, Plus, Users, X } from 'lucide-react';
+import { Check, Minus, Plus, Users, X } from 'lucide-react';
 import type { CoveredSplit, Transaction } from '@/types/database';
 
 interface CoveredSplitModalProps {
@@ -21,7 +21,7 @@ type SplitType = 'even' | 'itemized';
 interface ItemRow {
   description: string;
   amount: string;
-  assignedTo: string;
+  assignedTo: string[];
 }
 
 export function CoveredSplitModal({
@@ -36,14 +36,18 @@ export function CoveredSplitModal({
   const [friendNames, setFriendNames] = useState<string[]>(['']);
   const [splitType, setSplitType] = useState<SplitType>('even');
   const [items, setItems] = useState<ItemRow[]>([
-    { description: '', amount: '', assignedTo: '' },
+    { description: '', amount: '', assignedTo: [] },
   ]);
+  const [taxInput, setTaxInput] = useState('');
+  const [tipInput, setTipInput] = useState('');
   const [editingIdx, setEditingIdx] = useState<number | null>(null);
   const [editValue, setEditValue] = useState('');
   const [error, setError] = useState('');
 
   const existingSplit = transaction.covered_split;
-  const totalAmount = existingSplit ? existingSplit.originalAmount : transaction.amount;
+  const totalAmount = existingSplit
+    ? existingSplit.originalAmount
+    : transaction.amount;
   const savedFriends = useMemo(() => getSavedFriends(), []);
 
   useEffect(() => {
@@ -51,6 +55,8 @@ export function CoveredSplitModal({
       setEditingIdx(null);
       setEditValue('');
       setError('');
+      setTaxInput('');
+      setTipInput('');
 
       if (existingSplit) {
         const names = existingSplit.friends.map((f) => f.name);
@@ -61,7 +67,7 @@ export function CoveredSplitModal({
           existingSplit.friends.map((f) => ({
             description: f.name,
             amount: f.amount.toFixed(2),
-            assignedTo: f.name,
+            assignedTo: [f.name],
           }))
         );
         setStep(1);
@@ -70,7 +76,7 @@ export function CoveredSplitModal({
         setFriendCount(1);
         setFriendNames(['']);
         setSplitType('even');
-        setItems([{ description: '', amount: '', assignedTo: '' }]);
+        setItems([{ description: '', amount: '', assignedTo: [] }]);
       }
     }
   }, [isOpen, existingSplit]);
@@ -78,26 +84,46 @@ export function CoveredSplitModal({
   const allPeople = [userName, ...friendNames.filter((n) => n.trim())];
   const evenShare = allPeople.length > 0 ? totalAmount / allPeople.length : 0;
 
-  const itemizedTotals = useMemo(() => {
+  const taxAmount = parseFloat(taxInput) || 0;
+  const tipAmount = parseFloat(tipInput) || 0;
+  const taxTipTotal = taxAmount + tipAmount;
+
+  const itemizedSubtotals = useMemo(() => {
     const totals: Record<string, number> = {};
     for (const person of allPeople) totals[person] = 0;
     for (const item of items) {
       const amt = parseFloat(item.amount) || 0;
-      if (item.assignedTo === '__even__') {
-        const share = amt / allPeople.length;
-        for (const person of allPeople) totals[person] += share;
-      } else if (item.assignedTo && totals[item.assignedTo] !== undefined) {
-        totals[item.assignedTo] += amt;
+      if (item.assignedTo.length === 0) continue;
+      const share = amt / item.assignedTo.length;
+      for (const person of item.assignedTo) {
+        if (totals[person] !== undefined) totals[person] += share;
       }
     }
     return totals;
   }, [items, allPeople]);
 
+  const itemSubtotalSum = useMemo(
+    () => Object.values(itemizedSubtotals).reduce((s, v) => s + v, 0),
+    [itemizedSubtotals]
+  );
+
+  // Tax & tip distributed proportionally to each person's subtotal
+  const itemizedTotals = useMemo(() => {
+    const totals: Record<string, number> = {};
+    for (const person of allPeople) {
+      const sub = itemizedSubtotals[person] || 0;
+      const proportion = itemSubtotalSum > 0 ? sub / itemSubtotalSum : 0;
+      totals[person] = sub + taxTipTotal * proportion;
+    }
+    return totals;
+  }, [itemizedSubtotals, allPeople, taxTipTotal, itemSubtotalSum]);
+
   const itemizedSum = useMemo(
     () => items.reduce((s, i) => s + (parseFloat(i.amount) || 0), 0),
     [items]
   );
-  const itemizedRemaining = +(totalAmount - itemizedSum).toFixed(2);
+  const itemizedPlusTaxTip = itemizedSum + taxTipTotal;
+  const itemizedRemaining = +(totalAmount - itemizedPlusTaxTip).toFixed(2);
 
   const reviewShares: { name: string; amount: number }[] = useMemo(() => {
     if (splitType === 'even') {
@@ -147,14 +173,45 @@ export function CoveredSplitModal({
   const step1Valid = friendNames.every((n) => n.trim().length > 0);
 
   // --- Step 2 handlers ---
-  const handleItemChange = (
-    idx: number,
-    field: keyof ItemRow,
-    value: string
-  ) => {
+  const togglePersonForItem = (itemIdx: number, person: string) => {
     setItems((prev) => {
       const arr = [...prev];
-      arr[idx] = { ...arr[idx], [field]: value };
+      const current = arr[itemIdx].assignedTo;
+      arr[itemIdx] = {
+        ...arr[itemIdx],
+        assignedTo: current.includes(person)
+          ? current.filter((p) => p !== person)
+          : [...current, person],
+      };
+      return arr;
+    });
+  };
+
+  const selectAllForItem = (itemIdx: number) => {
+    setItems((prev) => {
+      const arr = [...prev];
+      const allSelected =
+        arr[itemIdx].assignedTo.length === allPeople.length;
+      arr[itemIdx] = {
+        ...arr[itemIdx],
+        assignedTo: allSelected ? [] : [...allPeople],
+      };
+      return arr;
+    });
+  };
+
+  const handleItemDescriptionChange = (idx: number, value: string) => {
+    setItems((prev) => {
+      const arr = [...prev];
+      arr[idx] = { ...arr[idx], description: value };
+      return arr;
+    });
+  };
+
+  const handleItemAmountChange = (idx: number, value: string) => {
+    setItems((prev) => {
+      const arr = [...prev];
+      arr[idx] = { ...arr[idx], amount: value };
       return arr;
     });
   };
@@ -162,7 +219,7 @@ export function CoveredSplitModal({
   const addItem = () =>
     setItems((prev) => [
       ...prev,
-      { description: '', amount: '', assignedTo: '' },
+      { description: '', amount: '', assignedTo: [] },
     ]);
 
   const removeItem = (idx: number) =>
@@ -189,13 +246,18 @@ export function CoveredSplitModal({
     const diff = newAmt - (itemizedTotals[person] || evenShare);
     setItems((prev) => [
       ...prev,
-      { description: 'Adjustment', amount: String(diff), assignedTo: person },
+      {
+        description: 'Adjustment',
+        amount: String(diff),
+        assignedTo: [person],
+      },
     ]);
     setEditingIdx(null);
   };
 
   const handleConfirm = () => {
-    const myShare = reviewShares.find((r) => r.name === userName)?.amount ?? 0;
+    const myShare =
+      reviewShares.find((r) => r.name === userName)?.amount ?? 0;
     if (!reviewValid) {
       setError('Amounts must add up to ' + formatCurrency(totalAmount));
       return;
@@ -206,7 +268,11 @@ export function CoveredSplitModal({
       splitType,
       friends: reviewShares
         .filter((r) => r.name !== userName)
-        .map((r) => ({ name: r.name, amount: r.amount, status: 'pending' as const })),
+        .map((r) => ({
+          name: r.name,
+          amount: r.amount,
+          status: 'pending' as const,
+        })),
     };
     onConfirm(split, myShare);
   };
@@ -398,39 +464,59 @@ export function CoveredSplitModal({
                         <X className="h-3.5 w-3.5" />
                       </button>
                     )}
-                    <Input
-                      placeholder="Item description"
-                      value={item.description}
-                      onChange={(e) =>
-                        handleItemChange(idx, 'description', e.target.value)
-                      }
-                    />
                     <div className="flex gap-2">
                       <Input
-                        placeholder="Amount"
+                        placeholder="Item (e.g. Breadsticks)"
+                        value={item.description}
+                        onChange={(e) =>
+                          handleItemDescriptionChange(idx, e.target.value)
+                        }
+                        className="flex-[2]"
+                      />
+                      <Input
+                        placeholder="$"
                         type="text"
                         inputMode="decimal"
                         value={item.amount}
                         onChange={(e) =>
-                          handleItemChange(idx, 'amount', e.target.value)
+                          handleItemAmountChange(idx, e.target.value)
                         }
                         className="flex-1"
                       />
-                      <select
-                        value={item.assignedTo}
-                        onChange={(e) =>
-                          handleItemChange(idx, 'assignedTo', e.target.value)
-                        }
-                        className="h-11 flex-1 rounded-xl border border-gray-200 bg-white px-3 text-sm text-gray-700 focus:border-[#14B8A6] focus:outline-none focus:ring-2 focus:ring-[#14B8A6]/20"
-                      >
-                        <option value="">Assign to…</option>
-                        <option value="__even__">Split evenly</option>
-                        {allPeople.map((p) => (
-                          <option key={p} value={p}>
-                            {p}
-                          </option>
-                        ))}
-                      </select>
+                    </div>
+                    {/* Multi-select person chips */}
+                    <div>
+                      <div className="flex flex-wrap gap-1.5">
+                        <button
+                          type="button"
+                          onClick={() => selectAllForItem(idx)}
+                          className={`rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                            item.assignedTo.length === allPeople.length
+                              ? 'bg-[#14B8A6] text-white'
+                              : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                          }`}
+                        >
+                          Everyone
+                        </button>
+                        {allPeople.map((person) => {
+                          const selected = item.assignedTo.includes(person);
+                          return (
+                            <button
+                              key={person}
+                              type="button"
+                              onClick={() => togglePersonForItem(idx, person)}
+                              className={`flex items-center gap-1 rounded-full px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                                selected
+                                  ? 'bg-[#14B8A6] text-white'
+                                  : 'border border-gray-200 bg-white text-gray-600 hover:bg-gray-50'
+                              }`}
+                            >
+                              {selected && <Check className="h-2.5 w-2.5" />}
+                              {person}
+                            </button>
+                          );
+                        })}
+                      </div>
                     </div>
                   </div>
                 ))}
@@ -442,6 +528,34 @@ export function CoveredSplitModal({
                 >
                   + Add Item
                 </Button>
+
+                {/* Tax & Tip */}
+                <div className="rounded-xl bg-gray-50 p-3 space-y-2">
+                  <p className="text-xs font-medium text-gray-600">
+                    Tax &amp; Tip{' '}
+                    <span className="font-normal text-gray-400">
+                      (distributed proportionally)
+                    </span>
+                  </p>
+                  <div className="flex gap-2">
+                    <Input
+                      placeholder="Tax"
+                      type="text"
+                      inputMode="decimal"
+                      value={taxInput}
+                      onChange={(e) => setTaxInput(e.target.value)}
+                      className="flex-1"
+                    />
+                    <Input
+                      placeholder="Tip"
+                      type="text"
+                      inputMode="decimal"
+                      value={tipInput}
+                      onChange={(e) => setTipInput(e.target.value)}
+                      className="flex-1"
+                    />
+                  </div>
+                </div>
 
                 <p
                   className={`text-center text-sm font-medium ${

@@ -60,7 +60,7 @@ export function Modal({ isOpen, onClose, title, children, className }: ModalProp
             </button>
           </div>
         </div>
-        <div className="px-5 py-4">
+        <div className="px-5 pt-4 pb-20 sm:pb-4">
           {children}
         </div>
       </div>

@@ -97,9 +97,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
   useEffect(() => {
     const {
       data: { subscription },
-    } = supabase.auth.onAuthStateChange(async (_event, session) => {
+    } = supabase.auth.onAuthStateChange((_event, session) => {
       if (session?.user) {
-        await fetchUserData(session.user);
+        fetchUserData(session.user);
       } else {
         setState({
           user: null,
@@ -108,14 +108,6 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           loading: false,
           error: null,
         });
-      }
-    });
-
-    supabase.auth.getSession().then(({ data: { session } }) => {
-      if (session?.user) {
-        fetchUserData(session.user);
-      } else {
-        setState((prev) => ({ ...prev, loading: false }));
       }
     });
 
@@ -128,10 +120,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
     setState((prev) => ({ ...prev, loading: true, error: null }));
 
     try {
-      const { data, error } = await supabase.auth.signInWithPassword({
+      const signInPromise = supabase.auth.signInWithPassword({
         email,
         password,
       });
+
+      const timeout = new Promise<never>((_, reject) =>
+        setTimeout(() => reject(new Error('Sign-in timed out. Please reload and try again.')), 10000)
+      );
+
+      const { data, error } = await Promise.race([signInPromise, timeout]);
+
       if (error) {
         setState((prev) => ({ ...prev, loading: false, error: error.message }));
         return { error: error.message };

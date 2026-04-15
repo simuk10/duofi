@@ -23,7 +23,7 @@ export default function CreditCardsPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
   const {
     creditCards,
     loading,
@@ -34,11 +34,17 @@ export default function CreditCardsPage() {
     householdId: household?.id ?? null,
   });
 
-  const paidByOptions = [
-    { value: 'person_a', label: household?.person_a_name || 'Person A' },
-    { value: 'person_b', label: household?.person_b_name || 'Person B' },
-    { value: 'joint', label: 'Joint (50/50)' },
-  ];
+  const paidByOptions = profile?.role === 'person_b'
+    ? [
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'joint', label: 'Joint (50/50)' },
+      ]
+    : [
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'joint', label: 'Joint (50/50)' },
+      ];
 
   const handleOpenCreate = () => {
     setEditingCard(null);

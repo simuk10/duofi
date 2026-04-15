@@ -48,6 +48,7 @@ interface Props {
   onSelectedPersonChange: (p: InsightSelectedPerson) => void;
   personALabel: string;
   personBLabel: string;
+  isPersonB?: boolean;
 }
 
 export function InsightsDashboard({
@@ -65,6 +66,7 @@ export function InsightsDashboard({
   onSelectedPersonChange,
   personALabel,
   personBLabel,
+  isPersonB,
 }: Props) {
   const [dropdownOpen, setDropdownOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
@@ -193,28 +195,23 @@ export function InsightsDashboard({
 
         {/* Person A / B — drives which personal / total-share slice is shown */}
         <div className="mt-3 flex rounded-lg bg-gray-100 p-1">
-          <button
-            type="button"
-            onClick={() => onSelectedPersonChange('A')}
-            className={`flex-1 rounded-lg py-2.5 px-3 text-sm font-medium transition-all ${
-              selectedPerson === 'A'
-                ? 'bg-[#14B8A6] text-white shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {personALabel}
-          </button>
-          <button
-            type="button"
-            onClick={() => onSelectedPersonChange('B')}
-            className={`flex-1 rounded-lg py-2.5 px-3 text-sm font-medium transition-all ${
-              selectedPerson === 'B'
-                ? 'bg-[#14B8A6] text-white shadow-sm'
-                : 'text-gray-600 hover:text-gray-900'
-            }`}
-          >
-            {personBLabel}
-          </button>
+          {([
+            isPersonB ? 'B' : 'A',
+            isPersonB ? 'A' : 'B',
+          ] as const).map((key) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => onSelectedPersonChange(key)}
+              className={`flex-1 rounded-lg py-2.5 px-3 text-sm font-medium transition-all ${
+                selectedPerson === key
+                  ? 'bg-[#14B8A6] text-white shadow-sm'
+                  : 'text-gray-600 hover:text-gray-900'
+              }`}
+            >
+              {key === 'A' ? personALabel : personBLabel}
+            </button>
+          ))}
         </div>
 
         {/* Owner toggle */}

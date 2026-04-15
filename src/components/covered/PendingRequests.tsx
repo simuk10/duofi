@@ -10,6 +10,7 @@ interface PendingRequestsProps {
   householdId: string | null;
   personAName: string;
   personBName: string;
+  isPersonB?: boolean;
 }
 
 interface FlatRequest {
@@ -39,6 +40,7 @@ export function PendingRequests({
   householdId,
   personAName,
   personBName,
+  isPersonB,
 }: PendingRequestsProps) {
   const [coveredTxs, setCoveredTxs] = useState<Transaction[]>([]);
   const [showPastByGroup, setShowPastByGroup] = useState<Record<string, boolean>>({});
@@ -122,11 +124,17 @@ export function PendingRequests({
 
   if (totalAll === 0) return null;
 
-  const groupOrder: { key: string; label: string }[] = [
-    { key: 'person_a', label: `${personAName}'s Requests` },
-    { key: 'person_b', label: `${personBName}'s Requests` },
-    { key: 'joint', label: 'Joint Requests' },
-  ];
+  const groupOrder: { key: string; label: string }[] = isPersonB
+    ? [
+        { key: 'person_b', label: `${personBName}'s Requests` },
+        { key: 'person_a', label: `${personAName}'s Requests` },
+        { key: 'joint', label: 'Joint Requests' },
+      ]
+    : [
+        { key: 'person_a', label: `${personAName}'s Requests` },
+        { key: 'person_b', label: `${personBName}'s Requests` },
+        { key: 'joint', label: 'Joint Requests' },
+      ];
 
   return (
     <div className="space-y-4">

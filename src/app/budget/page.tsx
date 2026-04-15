@@ -1,6 +1,6 @@
 'use client';
 
-import { useState, useMemo, useEffect } from 'react';
+import { useState, useMemo, useEffect, useRef } from 'react';
 import { AppLayout, Header } from '@/components/layout';
 import {
   Card,
@@ -131,7 +131,15 @@ export default function BudgetPage() {
   const [chartWindowOffset, setChartWindowOffset] = useState(0);
   const [filterTagIds, setFilterTagIds] = useState<string[]>([]);
 
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
+  const isPersonB = profile?.role === 'person_b';
+  const defaultedRef = useRef(false);
+  useEffect(() => {
+    if (profile && !defaultedRef.current) {
+      defaultedRef.current = true;
+      if (profile.role === 'person_b') setSelectedPerson('B');
+    }
+  }, [profile]);
   const { tags: householdTags } = useTags({ householdId: household?.id ?? null });
 
   useEffect(() => {
@@ -527,26 +535,24 @@ export default function BudgetPage() {
 
             {/* Person Toggle */}
             <div className="flex bg-white rounded-xl p-1 shadow-sm border border-gray-100">
-              <button
-                onClick={() => setSelectedPerson('A')}
-                className={`flex-1 py-2.5 px-4 rounded-lg text-sm transition-all ${
-                  selectedPerson === 'A'
-                    ? 'bg-[#14B8A6] text-white shadow-sm'
-                    : 'text-gray-600'
-                }`}
-              >
-                {household?.person_a_name || 'Person A'}
-              </button>
-              <button
-                onClick={() => setSelectedPerson('B')}
-                className={`flex-1 py-2.5 px-4 rounded-lg text-sm transition-all ${
-                  selectedPerson === 'B'
-                    ? 'bg-[#14B8A6] text-white shadow-sm'
-                    : 'text-gray-600'
-                }`}
-              >
-                {household?.person_b_name || 'Person B'}
-              </button>
+              {([
+                isPersonB ? 'B' : 'A',
+                isPersonB ? 'A' : 'B',
+              ] as const).map((key) => (
+                <button
+                  key={key}
+                  onClick={() => setSelectedPerson(key)}
+                  className={`flex-1 py-2.5 px-4 rounded-lg text-sm transition-all ${
+                    selectedPerson === key
+                      ? 'bg-[#14B8A6] text-white shadow-sm'
+                      : 'text-gray-600'
+                  }`}
+                >
+                  {key === 'A'
+                    ? household?.person_a_name || 'Person A'
+                    : household?.person_b_name || 'Person B'}
+                </button>
+              ))}
             </div>
 
             {/* Overall Total Card */}

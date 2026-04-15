@@ -1,6 +1,6 @@
 'use client';
 
-import { useMemo, useState } from 'react';
+import { useMemo, useState, useEffect, useRef } from 'react';
 import Link from 'next/link';
 import { AppLayout } from '@/components/layout';
 import { Button } from '@/components/ui';
@@ -52,7 +52,15 @@ export default function InsightsPage() {
     return getChartMonthWindow(0, rangePreset === 'custom' ? 12 : rangePreset);
   }, [rangePreset, customFrom, customTo, isCustom]);
 
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
+  const isPersonB = profile?.role === 'person_b';
+  const defaultedRef = useRef(false);
+  useEffect(() => {
+    if (profile && !defaultedRef.current) {
+      defaultedRef.current = true;
+      if (profile.role === 'person_b') setSelectedPerson('B');
+    }
+  }, [profile]);
   const { transactions, loading } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'all',
@@ -125,6 +133,7 @@ export default function InsightsPage() {
           onSelectedPersonChange={setSelectedPerson}
           personALabel={household?.person_a_name ?? 'Person A'}
           personBLabel={household?.person_b_name ?? 'Person B'}
+          isPersonB={isPersonB}
         />
       )}
     </AppLayout>

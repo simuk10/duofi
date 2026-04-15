@@ -203,11 +203,18 @@ function TransactionsPageContent() {
     router.replace(q ? `/transactions?${q}` : '/transactions');
   };
 
-  const budgetOwnerOptions = [
-    { value: 'person_a', label: household?.person_a_name || 'Person A' },
-    { value: 'person_b', label: household?.person_b_name || 'Person B' },
-    { value: 'joint', label: 'Joint' },
-  ];
+  const isPersonB = profile?.role === 'person_b';
+  const budgetOwnerOptions = isPersonB
+    ? [
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'joint', label: 'Joint' },
+      ]
+    : [
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'joint', label: 'Joint' },
+      ];
 
   const categoryOptions = categories.map((c) => ({
     value: c.id,

@@ -28,7 +28,7 @@ export default function SettlementPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState('');
 
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
   const { transactions, loading: txLoading } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'categorized',
@@ -300,6 +300,7 @@ export default function SettlementPage() {
                 householdId={household?.id ?? null}
                 personAName={household?.person_a_name || 'Person A'}
                 personBName={household?.person_b_name || 'Person B'}
+                isPersonB={profile?.role === 'person_b'}
               />
             </div>
           </>

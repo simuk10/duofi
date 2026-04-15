@@ -78,7 +78,7 @@ export default function UploadPage() {
   const consentRef = useRef({ file: false, tx: false });
 
   const router = useRouter();
-  const { household } = useAuth();
+  const { household, profile } = useAuth();
   const { creditCards, createCreditCard } = useCreditCards({
     householdId: household?.id ?? null,
   });
@@ -353,11 +353,17 @@ export default function UploadPage() {
     });
   }, [step, parsedTransactions, isCategorized]);
 
-  const paidByOptions = [
-    { value: 'person_a', label: household?.person_a_name || 'Person A' },
-    { value: 'person_b', label: household?.person_b_name || 'Person B' },
-    { value: 'joint', label: 'Joint (50/50)' },
-  ];
+  const paidByOptions = profile?.role === 'person_b'
+    ? [
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'joint', label: 'Joint (50/50)' },
+      ]
+    : [
+        { value: 'person_a', label: household?.person_a_name || 'Person A' },
+        { value: 'person_b', label: household?.person_b_name || 'Person B' },
+        { value: 'joint', label: 'Joint (50/50)' },
+      ];
 
   return (
     <AppLayout>

@@ -194,14 +194,10 @@ export function parseCSV(
       return; // Skip zero or invalid amounts
     }
     
-    // We only care about expenses (positive amounts after our parsing)
-    // Some banks show credits as negative, some as positive in credit column
-    const finalAmount = Math.abs(amount);
-    
     transactions.push({
       date,
       description,
-      amount: finalAmount,
+      amount,
     });
   });
   
@@ -300,7 +296,7 @@ export function parseCategorizedCSV(csvContent: string): CategorizedCSVParseResu
     transactions.push({
       date,
       description,
-      amount: Math.abs(amount),
+      amount,
       budgetType,
       category,
       sourceAccount,

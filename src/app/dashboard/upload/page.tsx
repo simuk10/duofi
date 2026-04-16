@@ -544,7 +544,7 @@ export default function UploadPage() {
                           {new Date(tx.date).toLocaleDateString()}
                         </p>
                       </div>
-                      <p className="text-sm text-gray-900">
+                      <p className={`text-sm ${tx.amount < 0 ? 'text-[#10B981]' : 'text-gray-900'}`}>
                         {formatCurrency(tx.amount)}
                       </p>
                     </div>

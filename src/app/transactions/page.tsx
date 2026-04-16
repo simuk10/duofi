@@ -28,7 +28,7 @@ import {
 } from '@/lib/category-suggestions';
 import { CoveredSplitModal } from '@/components/covered/CoveredSplitModal';
 import { addSavedFriends } from '@/lib/saved-friends';
-import { ChevronDown, Lightbulb, Search, Upload, Users, X } from 'lucide-react';
+import { ChevronDown, Lightbulb, Search, Trash2, Upload, Users, X } from 'lucide-react';
 import Link from 'next/link';
 import type { Transaction, BudgetOwner, CoveredSplit } from '@/types/database';
 
@@ -54,6 +54,8 @@ function TransactionsPageContent() {
   const [modalTagIds, setModalTagIds] = useState<string[]>([]);
   const [newTagInput, setNewTagInput] = useState('');
   const [globalSearch, setGlobalSearch] = useState('');
+  const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [showCoveredModal, setShowCoveredModal] = useState(false);
   const [pendingSplitAction, setPendingSplitAction] = useState<
     | { type: 'set'; split: CoveredSplit; newAmount: number }
@@ -69,7 +71,7 @@ function TransactionsPageContent() {
   const { tags: householdTags, createTag } = useTags({
     householdId: household?.id ?? null,
   });
-  const { transactions, loading, updateTransaction, replaceTransactionTags } =
+  const { transactions, loading, updateTransaction, deleteTransaction, replaceTransactionTags } =
     useTransactions({
       householdId: household?.id ?? null,
       filter: 'all',
@@ -240,6 +242,7 @@ function TransactionsPageContent() {
     setNewTagInput('');
     setSaveError('');
     setPendingSplitAction(null);
+    setShowDeleteConfirm(false);
   };
 
   const handleAddNewTagInModal = async () => {
@@ -300,6 +303,22 @@ function TransactionsPageContent() {
       setSaveError('Could not save changes. Try again.');
     } finally {
       setSaving(false);
+    }
+  };
+
+  const handleDelete = async () => {
+    if (!selectedTransaction) return;
+    setDeleting(true);
+    try {
+      await deleteTransaction(selectedTransaction.id);
+      if (globalSearch.trim()) void refetchSearchTransactions();
+      setSelectedTransaction(null);
+      setShowDeleteConfirm(false);
+    } catch (error) {
+      console.error('Failed to delete transaction:', error);
+      setSaveError('Could not delete transaction. Try again.');
+    } finally {
+      setDeleting(false);
     }
   };
 
@@ -383,7 +402,7 @@ function TransactionsPageContent() {
               <p className="mt-0.5 text-xs text-gray-500">{formatDate(tx.date)}</p>
             </div>
           </div>
-          <p className="text-[15px] text-gray-900">{formatCurrency(tx.amount)}</p>
+          <p className={`text-[15px] ${tx.amount < 0 ? 'text-[#10B981]' : 'text-gray-900'}`}>{formatCurrency(tx.amount)}</p>
         </div>
         <p className="px-1 text-xs text-gray-400">
           Source: {tx.credit_card?.name || 'Unknown card'} (
@@ -962,6 +981,39 @@ function TransactionsPageContent() {
                 Save
               </Button>
             </div>
+
+            {!showDeleteConfirm ? (
+              <button
+                type="button"
+                onClick={() => setShowDeleteConfirm(true)}
+                className="flex items-center justify-center gap-1.5 w-full text-xs text-gray-400 hover:text-red-500 pt-2 transition-colors"
+              >
+                <Trash2 className="h-3.5 w-3.5" />
+                Delete transaction
+              </button>
+            ) : (
+              <div className="rounded-lg border border-red-200 bg-red-50 p-3 mt-1">
+                <p className="text-sm text-red-700 mb-2">
+                  Are you sure? This cannot be undone.
+                </p>
+                <div className="flex gap-2">
+                  <Button
+                    variant="outline"
+                    onClick={() => setShowDeleteConfirm(false)}
+                    className="flex-1 text-xs"
+                  >
+                    Keep
+                  </Button>
+                  <Button
+                    onClick={handleDelete}
+                    loading={deleting}
+                    className="flex-1 text-xs !bg-red-600 hover:!bg-red-700"
+                  >
+                    Delete
+                  </Button>
+                </div>
+              </div>
+            )}
           </div>
         )}
       </Modal>

@@ -655,6 +655,10 @@ export function CoveredSplitModal({
               </span>
             </div>
 
+            <p className="text-center text-xs text-gray-400">
+              Venmo collection will be attributed to you ({userName}) for settlement purposes.
+            </p>
+
             {error && (
               <p className="text-center text-sm text-red-600">{error}</p>
             )}

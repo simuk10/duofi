@@ -283,6 +283,26 @@ export default function SettlementPage() {
                     {formatCurrency(calculationDetails.personBPaidForShared)}
                   </span>
                 </div>
+                {(settlement.venmoOffsetA > 0 || settlement.venmoOffsetB > 0) && (
+                  <>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">
+                        {household?.person_a_name} collected from group splits
+                      </span>
+                      <span className="text-gray-900">
+                        {formatCurrency(settlement.venmoOffsetA)}
+                      </span>
+                    </div>
+                    <div className="flex items-center justify-between text-sm">
+                      <span className="text-gray-600">
+                        {household?.person_b_name} collected from group splits
+                      </span>
+                      <span className="text-gray-900">
+                        {formatCurrency(settlement.venmoOffsetB)}
+                      </span>
+                    </div>
+                  </>
+                )}
                 <div className="pt-2 border-t border-gray-100">
                   <div className="flex items-center justify-between text-sm">
                     <span className="text-gray-900">Net balance after repayments</span>

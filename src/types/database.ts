@@ -68,6 +68,7 @@ export interface CoveredSplit {
   myShare: number;
   splitType: 'even' | 'itemized';
   friends: CoveredSplitFriend[];
+  coveredBy?: 'person_a' | 'person_b';
 }
 
 export interface Transaction {

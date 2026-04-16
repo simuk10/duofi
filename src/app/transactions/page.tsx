@@ -989,7 +989,12 @@ function TransactionsPageContent() {
           }
           userName={currentUserName || 'You'}
           onConfirm={(split: CoveredSplit, newAmount: number) => {
-            setPendingSplitAction({ type: 'set', split, newAmount });
+            const role = profile?.role === 'person_b' ? 'person_b' as const : 'person_a' as const;
+            setPendingSplitAction({
+              type: 'set',
+              split: { ...split, coveredBy: role },
+              newAmount,
+            });
             setAmountInput(String(newAmount));
             setShowCoveredModal(false);
           }}

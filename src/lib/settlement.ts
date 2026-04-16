@@ -6,6 +6,8 @@ export interface SettlementResult {
   netBalance: number;
   summary: string;
   personAOwes: boolean;
+  venmoOffsetA: number;
+  venmoOffsetB: number;
 }
 
 export interface TransactionDebt {
@@ -114,6 +116,36 @@ export function calculateSettlement(
     }
   }
 
+  // Venmo collection offsets: when one person collects Venmo money
+  // from friends, the settlement must account for who pocketed it
+  let venmoOffsetA = 0;
+  let venmoOffsetB = 0;
+
+  for (const tx of transactions) {
+    if (!tx.is_covered || !tx.covered_split?.coveredBy) continue;
+    const friendsTotal = tx.covered_split.friends.reduce((s, f) => s + f.amount, 0);
+    if (friendsTotal === 0) continue;
+    const coveredBy = tx.covered_split.coveredBy;
+
+    if (tx.paid_by === 'joint') {
+      if (coveredBy === 'person_a') {
+        totalOwedByA += friendsTotal / 2;
+        venmoOffsetA += friendsTotal / 2;
+      } else {
+        totalOwedByB += friendsTotal / 2;
+        venmoOffsetB += friendsTotal / 2;
+      }
+    } else if (tx.paid_by !== coveredBy) {
+      if (coveredBy === 'person_a') {
+        totalOwedByA += friendsTotal;
+        venmoOffsetA += friendsTotal;
+      } else {
+        totalOwedByB += friendsTotal;
+        venmoOffsetB += friendsTotal;
+      }
+    }
+  }
+
   // Apply repayments
   for (const repayment of repayments) {
     if (repayment.paid_by === 'person_a' && repayment.paid_to === 'person_b') {
@@ -142,6 +174,8 @@ export function calculateSettlement(
     netBalance,
     summary,
     personAOwes,
+    venmoOffsetA,
+    venmoOffsetB,
   };
 }
 

@@ -141,10 +141,14 @@ function TransactionsPageContent() {
 
   const searchResults = useMemo(() => {
     if (!searchActive) return [];
-    return allTransactionsForSearch.filter((t) =>
-      transactionMatchesSearch(t, globalSearch)
-    );
-  }, [allTransactionsForSearch, globalSearch, searchActive]);
+    let pool = allTransactionsForSearch;
+    if (filter === 'uncategorized') {
+      pool = pool.filter((t) => !t.is_categorized);
+    } else if (filter === 'categorized') {
+      pool = pool.filter((t) => t.is_categorized);
+    }
+    return pool.filter((t) => transactionMatchesSearch(t, globalSearch));
+  }, [allTransactionsForSearch, globalSearch, searchActive, filter]);
 
   const filteredCategoryName = useMemo(
     () => categories.find((c) => c.id === categoryUrlFilter)?.name,

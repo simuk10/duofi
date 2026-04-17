@@ -1,6 +1,6 @@
 'use client';
 
-import { Suspense, useState, useMemo, useEffect } from 'react';
+import { Suspense, useState, useMemo, useEffect, useRef, useCallback } from 'react';
 import { useSearchParams, useRouter } from 'next/navigation';
 import { AppLayout, Header } from '@/components/layout';
 import {
@@ -81,6 +81,24 @@ function TransactionsPageContent() {
       filter: 'all',
       monthYear: selectedMonth === '' ? undefined : selectedMonth,
     });
+  const [debouncedSearch, setDebouncedSearch] = useState('');
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+
+  const handleSearchChange = useCallback((value: string) => {
+    setGlobalSearch(value);
+    setBulkExcluded(new Set());
+    setBulkCategory('');
+    setBulkOwner('');
+    clearTimeout(debounceRef.current);
+    debounceRef.current = setTimeout(() => {
+      setDebouncedSearch(value.trim());
+    }, 300);
+  }, []);
+
+  useEffect(() => {
+    return () => clearTimeout(debounceRef.current);
+  }, []);
+
   const searchActive = globalSearch.trim().length > 0;
   const {
     transactions: allTransactionsForSearch,
@@ -89,7 +107,8 @@ function TransactionsPageContent() {
   } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'all',
-    enabled: searchActive,
+    enabled: debouncedSearch.length > 0,
+    searchTerm: debouncedSearch || undefined,
   });
   const { categories } = useCategories({
     householdId: household?.id ?? null,
@@ -151,8 +170,8 @@ function TransactionsPageContent() {
     } else if (filter === 'categorized') {
       pool = pool.filter((t) => t.is_categorized);
     }
-    return pool.filter((t) => transactionMatchesSearch(t, globalSearch));
-  }, [allTransactionsForSearch, globalSearch, searchActive, filter]);
+    return pool.filter((t) => transactionMatchesSearch(t, debouncedSearch));
+  }, [allTransactionsForSearch, debouncedSearch, searchActive, filter]);
 
   const filteredCategoryName = useMemo(
     () => categories.find((c) => c.id === categoryUrlFilter)?.name,
@@ -609,12 +628,7 @@ function TransactionsPageContent() {
           <input
             type="search"
             value={globalSearch}
-            onChange={(e) => {
-              setGlobalSearch(e.target.value);
-              setBulkExcluded(new Set());
-              setBulkCategory('');
-              setBulkOwner('');
-            }}
+            onChange={(e) => handleSearchChange(e.target.value)}
             placeholder="Search all months…"
             autoComplete="off"
             className="w-full rounded-xl border border-gray-200 bg-gray-50/80 py-2.5 pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#14B8A6] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#14B8A6]/20"
@@ -623,7 +637,7 @@ function TransactionsPageContent() {
           {globalSearch ? (
             <button
               type="button"
-              onClick={() => setGlobalSearch('')}
+              onClick={() => handleSearchChange('')}
               className="absolute right-2 top-1/2 flex h-8 w-8 -translate-y-1/2 items-center justify-center rounded-lg text-gray-500 hover:bg-gray-100 hover:text-gray-800"
               aria-label="Clear search"
             >
@@ -714,7 +728,7 @@ function TransactionsPageContent() {
                 Nothing in your household matched &quot;{globalSearch.trim()}&quot; in description,
                 notes, date, or amount.
               </p>
-              <Button variant="outline" onClick={() => setGlobalSearch('')}>
+              <Button variant="outline" onClick={() => handleSearchChange('')}>
                 Clear search
               </Button>
             </div>

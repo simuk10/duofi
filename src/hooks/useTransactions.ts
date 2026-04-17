@@ -84,6 +84,8 @@ interface UseTransactionsOptions {
   tagFilterIds?: string[];
   /** When false, skip fetch and keep an empty list (e.g. lazy search pool). */
   enabled?: boolean;
+  /** Server-side description search (ilike). Skips tag loading for speed. */
+  searchTerm?: string;
 }
 
 export function useTransactions({
@@ -96,6 +98,7 @@ export function useTransactions({
   budgetOwner,
   tagFilterIds,
   enabled = true,
+  searchTerm,
 }: UseTransactionsOptions) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -187,8 +190,12 @@ export function useTransactions({
         query = query.eq('budget_owner', budgetOwner);
       }
 
+      if (searchTerm) {
+        query = query.ilike('description', `%${searchTerm}%`);
+      }
+
       if (!monthYear && !(dateFrom && dateTo)) {
-        query = query.limit(20_000);
+        query = query.limit(searchTerm ? 500 : 20_000);
       }
 
       const { data, error: fetchError } = await query;
@@ -199,13 +206,18 @@ export function useTransactions({
       const base = rows.map((row) =>
         mapTransactionRow({ ...row, transaction_tags: undefined })
       );
-      const tagMap = await loadTagsForTransactions(
-        supabase,
-        base.map((t) => t.id)
-      );
-      setTransactions(
-        base.map((t) => ({ ...t, tags: tagMap.get(t.id) ?? [] }))
-      );
+
+      if (searchTerm) {
+        setTransactions(base.map((t) => ({ ...t, tags: [] })));
+      } else {
+        const tagMap = await loadTagsForTransactions(
+          supabase,
+          base.map((t) => t.id)
+        );
+        setTransactions(
+          base.map((t) => ({ ...t, tags: tagMap.get(t.id) ?? [] }))
+        );
+      }
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to fetch transactions');
     } finally {
@@ -221,6 +233,7 @@ export function useTransactions({
     budgetOwner,
     tagFilterIds,
     enabled,
+    searchTerm,
     supabase,
   ]);
 

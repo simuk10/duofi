@@ -57,6 +57,10 @@ function TransactionsPageContent() {
   const [showDeleteConfirm, setShowDeleteConfirm] = useState(false);
   const [deleting, setDeleting] = useState(false);
   const [showCoveredModal, setShowCoveredModal] = useState(false);
+  const [bulkExcluded, setBulkExcluded] = useState<Set<string>>(new Set());
+  const [bulkCategory, setBulkCategory] = useState('');
+  const [bulkOwner, setBulkOwner] = useState<BudgetOwner | ''>('');
+  const [bulkSaving, setBulkSaving] = useState(false);
   const [pendingSplitAction, setPendingSplitAction] = useState<
     | { type: 'set'; split: CoveredSplit; newAmount: number }
     | { type: 'remove'; originalAmount: number }
@@ -71,7 +75,7 @@ function TransactionsPageContent() {
   const { tags: householdTags, createTag } = useTags({
     householdId: household?.id ?? null,
   });
-  const { transactions, loading, updateTransaction, deleteTransaction, replaceTransactionTags } =
+  const { transactions, loading, updateTransaction, bulkUpdateTransactions, deleteTransaction, replaceTransactionTags } =
     useTransactions({
       householdId: household?.id ?? null,
       filter: 'all',
@@ -326,6 +330,33 @@ function TransactionsPageContent() {
     }
   };
 
+  const bulkTargets = useMemo(() => {
+    if (!searchActive) return [];
+    return searchResults.filter(
+      (t) => !t.is_categorized && !bulkExcluded.has(t.id)
+    );
+  }, [searchActive, searchResults, bulkExcluded]);
+
+  const handleBulkApply = async () => {
+    if (!bulkCategory || !bulkOwner || bulkTargets.length === 0) return;
+    setBulkSaving(true);
+    try {
+      const ids = bulkTargets.map((t) => t.id);
+      await bulkUpdateTransactions(ids, {
+        category_id: bulkCategory,
+        budget_owner: bulkOwner as BudgetOwner,
+      });
+      void refetchSearchTransactions();
+      setBulkCategory('');
+      setBulkOwner('');
+      setBulkExcluded(new Set());
+    } catch (error) {
+      console.error('Failed to bulk categorize:', error);
+    } finally {
+      setBulkSaving(false);
+    }
+  };
+
   const handleInlineCategoryChange = async (tx: Transaction, value: string) => {
     setInlineSavingId(tx.id);
     try {
@@ -381,35 +412,38 @@ function TransactionsPageContent() {
     const learnedCategoryName = learned
       ? categories.find((c) => c.id === learned.categoryId)?.name
       : undefined;
+    const isBulkExcluded = bulkExcluded.has(tx.id);
+    const showBulkExclude = searchActive && !tx.is_categorized && (bulkCategory || bulkOwner);
 
     return (
-    <Card key={tx.id} className="p-4">
-      <div
-        role="button"
-        tabIndex={0}
-        onClick={() => handleOpenEdit(tx)}
-        onKeyDown={(e) => {
-          if (e.key === 'Enter' || e.key === ' ') {
-            e.preventDefault();
-            handleOpenEdit(tx);
-          }
-        }}
-        className="cursor-pointer rounded-xl p-1 -m-1 transition-colors hover:bg-gray-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14B8A6]/30"
-      >
-        <div className="mb-3 flex items-start justify-between">
-          <div className="flex items-center gap-3">
-            <div className="flex h-10 w-10 items-center justify-center rounded-full bg-gradient-to-br from-[#14B8A6]/20 to-[#0891B2]/20">
-              <span className="text-sm text-[#0891B2]">
-                {tx.description.charAt(0).toUpperCase()}
-              </span>
+    <Card key={tx.id} className={`p-4 ${isBulkExcluded ? 'opacity-40' : ''}`}>
+      <div className="flex items-start gap-2">
+        <div
+          role="button"
+          tabIndex={0}
+          onClick={() => handleOpenEdit(tx)}
+          onKeyDown={(e) => {
+            if (e.key === 'Enter' || e.key === ' ') {
+              e.preventDefault();
+              handleOpenEdit(tx);
+            }
+          }}
+          className="flex-1 min-w-0 cursor-pointer rounded-xl p-1 -m-1 transition-colors hover:bg-gray-50/80 focus:outline-none focus-visible:ring-2 focus-visible:ring-[#14B8A6]/30"
+        >
+          <div className="mb-3 flex items-start justify-between">
+            <div className="flex items-center gap-3">
+              <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#14B8A6]/20 to-[#0891B2]/20">
+                <span className="text-sm text-[#0891B2]">
+                  {tx.description.charAt(0).toUpperCase()}
+                </span>
+              </div>
+              <div>
+                <p className="text-[15px] text-gray-900">{tx.description}</p>
+                <p className="mt-0.5 text-xs text-gray-500">{formatDate(tx.date)}</p>
+              </div>
             </div>
-            <div>
-              <p className="text-[15px] text-gray-900">{tx.description}</p>
-              <p className="mt-0.5 text-xs text-gray-500">{formatDate(tx.date)}</p>
-            </div>
+            <p className={`text-[15px] ${tx.amount < 0 ? 'text-[#10B981]' : 'text-gray-900'}`}>{formatCurrency(tx.amount)}</p>
           </div>
-          <p className={`text-[15px] ${tx.amount < 0 ? 'text-[#10B981]' : 'text-gray-900'}`}>{formatCurrency(tx.amount)}</p>
-        </div>
         <p className="px-1 text-xs text-gray-400">
           Source: {tx.credit_card?.name || 'Unknown card'} (
           {tx.paid_by === 'person_a'
@@ -422,6 +456,26 @@ function TransactionsPageContent() {
         {tx.notes && (
           <p className="mt-1 px-1 text-xs text-gray-600 line-clamp-2">{tx.notes}</p>
         )}
+      </div>
+      {showBulkExclude && (
+        <button
+          type="button"
+          onClick={(e) => {
+            e.stopPropagation();
+            setBulkExcluded((prev) => {
+              const next = new Set(prev);
+              if (next.has(tx.id)) next.delete(tx.id);
+              else next.add(tx.id);
+              return next;
+            });
+          }}
+          className="mt-1 shrink-0 rounded-lg p-1.5 text-gray-400 hover:bg-gray-100 hover:text-gray-600 transition-colors"
+          aria-label={isBulkExcluded ? 'Re-include in bulk action' : 'Exclude from bulk action'}
+          title={isBulkExcluded ? 'Re-include' : 'Exclude'}
+        >
+          <X className="h-4 w-4" />
+        </button>
+      )}
       </div>
 
       {learned && learnedCategoryName && (
@@ -555,7 +609,12 @@ function TransactionsPageContent() {
           <input
             type="search"
             value={globalSearch}
-            onChange={(e) => setGlobalSearch(e.target.value)}
+            onChange={(e) => {
+              setGlobalSearch(e.target.value);
+              setBulkExcluded(new Set());
+              setBulkCategory('');
+              setBulkOwner('');
+            }}
             placeholder="Search all months…"
             autoComplete="off"
             className="w-full rounded-xl border border-gray-200 bg-gray-50/80 py-2.5 pl-10 pr-10 text-sm text-gray-900 placeholder:text-gray-400 focus:border-[#14B8A6] focus:bg-white focus:outline-none focus:ring-2 focus:ring-[#14B8A6]/20"
@@ -664,6 +723,64 @@ function TransactionsPageContent() {
               <p className="text-center text-xs text-gray-500">
                 {searchResults.length} result{searchResults.length === 1 ? '' : 's'} · all months
               </p>
+
+              {searchResults.some((t) => !t.is_categorized) && (
+                <Card className="p-4 border-[#14B8A6]/30 bg-gradient-to-r from-[#14B8A6]/5 to-[#0891B2]/5">
+                  <p className="text-xs font-medium text-gray-700 mb-3">
+                    Bulk categorize{bulkExcluded.size > 0
+                      ? ` (${bulkTargets.length} of ${searchResults.filter((t) => !t.is_categorized).length})`
+                      : ` all ${searchResults.filter((t) => !t.is_categorized).length} uncategorized`}
+                  </p>
+                  <div className="flex items-center gap-2">
+                    <div className="relative min-w-0 flex-1">
+                      <select
+                        aria-label="Bulk category"
+                        value={bulkCategory}
+                        onChange={(e) => setBulkCategory(e.target.value)}
+                        className="h-9 w-full cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-sm text-gray-700 focus:border-[#14B8A6] focus:outline-none focus:ring-2 focus:ring-[#14B8A6]/20"
+                      >
+                        <option value="">Category</option>
+                        {categoryOptions.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
+                    </div>
+                    <div className="relative min-w-0 flex-1">
+                      <select
+                        aria-label="Bulk budget owner"
+                        value={bulkOwner}
+                        onChange={(e) => setBulkOwner(e.target.value as BudgetOwner | '')}
+                        className="h-9 w-full cursor-pointer appearance-none rounded-lg border border-gray-200 bg-white py-1.5 pl-3 pr-8 text-sm text-gray-700 focus:border-[#14B8A6] focus:outline-none focus:ring-2 focus:ring-[#14B8A6]/20"
+                      >
+                        <option value="">Owner</option>
+                        {budgetOwnerOptions.map((o) => (
+                          <option key={o.value} value={o.value}>{o.label}</option>
+                        ))}
+                      </select>
+                      <ChevronDown className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-gray-400" aria-hidden />
+                    </div>
+                  </div>
+                  <Button
+                    onClick={() => void handleBulkApply()}
+                    loading={bulkSaving}
+                    disabled={!bulkCategory || !bulkOwner || bulkTargets.length === 0}
+                    className="w-full mt-3 text-sm"
+                  >
+                    Apply to {bulkTargets.length} transaction{bulkTargets.length === 1 ? '' : 's'}
+                  </Button>
+                  {bulkExcluded.size > 0 && (
+                    <button
+                      type="button"
+                      onClick={() => setBulkExcluded(new Set())}
+                      className="w-full mt-1.5 text-xs text-gray-500 hover:text-gray-700"
+                    >
+                      Re-include all excluded ({bulkExcluded.size})
+                    </button>
+                  )}
+                </Card>
+              )}
+
               {searchResults.map((tx) => renderTransactionCard(tx))}
             </div>
           )

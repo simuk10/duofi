@@ -313,6 +313,30 @@ export function useTransactions({
     [supabase, transactions]
   );
 
+  const bulkUpdateTransactions = async (
+    ids: string[],
+    updates: {
+      category_id?: string | null;
+      budget_owner?: BudgetOwner | null;
+    }
+  ) => {
+    if (ids.length === 0) return;
+
+    const is_categorized = !!(updates.category_id && updates.budget_owner);
+    const { error: updateError } = await supabase
+      .from('transactions')
+      .update({ ...updates, is_categorized })
+      .in('id', ids);
+
+    if (updateError) throw updateError;
+
+    setTransactions((prev) =>
+      prev.map((t) =>
+        ids.includes(t.id) ? { ...t, ...updates, is_categorized } : t
+      )
+    );
+  };
+
   const deleteTransaction = async (id: string) => {
     const { error: deleteError } = await supabase
       .from('transactions')
@@ -522,6 +546,7 @@ export function useTransactions({
     error,
     refetch: fetchTransactions,
     updateTransaction,
+    bulkUpdateTransactions,
     deleteTransaction,
     replaceTransactionTags,
     importTransactions,

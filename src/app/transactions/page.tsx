@@ -328,6 +328,7 @@ function TransactionsPageContent() {
       await updateTransaction(tx.id, {
         category_id: value === '' ? null : value,
       });
+      if (globalSearch.trim()) void refetchSearchTransactions();
     } catch (error) {
       console.error('Failed to update category:', error);
     } finally {
@@ -341,6 +342,7 @@ function TransactionsPageContent() {
       await updateTransaction(tx.id, {
         budget_owner: value === '' ? null : (value as BudgetOwner),
       });
+      if (globalSearch.trim()) void refetchSearchTransactions();
     } catch (error) {
       console.error('Failed to update owner:', error);
     } finally {

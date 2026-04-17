@@ -82,7 +82,7 @@ function TransactionsPageContent() {
       monthYear: selectedMonth === '' ? undefined : selectedMonth,
     });
   const [debouncedSearch, setDebouncedSearch] = useState('');
-  const debounceRef = useRef<ReturnType<typeof setTimeout>>();
+  const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
   const handleSearchChange = useCallback((value: string) => {
     setGlobalSearch(value);

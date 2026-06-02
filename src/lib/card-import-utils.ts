@@ -115,23 +115,89 @@ export async function duplicateSamplesForRows(
   return { count, samples };
 }
 
-/** Per-card date ranges for pre-categorized rows (by source account name → card id). */
-export function groupedDateRangesByCardName(
+export interface CardImportLogRow {
+  credit_card_id: string;
+  file_hash: string;
+  date_from: string;
+  date_to: string;
+  transaction_count: number;
+}
+
+/** Last calendar day of YYYY-MM (local date math). */
+export function lastDayOfMonthYm(monthYm: string): string {
+  const [y, m] = monthYm.split('-').map(Number);
+  const last = new Date(y, m, 0).getDate();
+  return `${y}-${String(m).padStart(2, '0')}-${String(last).padStart(2, '0')}`;
+}
+
+export function calendarMonthBounds(monthYm: string): {
+  dateFrom: string;
+  dateTo: string;
+} {
+  return { dateFrom: `${monthYm}-01`, dateTo: lastDayOfMonthYm(monthYm) };
+}
+
+/**
+ * One card_imports row per (card, calendar month) that has transactions in the file.
+ * Ensures statement coverage reflects every card/month present in a pre-categorized upload.
+ */
+export function buildCardImportLogRowsFromCategorized(
   rows: { date: string; sourceAccount: string }[],
-  cardNameToId: Map<string, string>
-): Map<string, { dateFrom: string; dateTo: string; count: number }> {
-  const byCard = new Map<string, string[]>();
+  cardNameToId: Map<string, string>,
+  fileHash: string
+): CardImportLogRow[] {
+  const counts = new Map<string, Map<string, number>>();
+
   for (const r of rows) {
-    const id = cardNameToId.get(r.sourceAccount.toLowerCase());
-    if (!id) continue;
-    const arr = byCard.get(id) || [];
-    arr.push(r.date);
-    byCard.set(id, arr);
+    const cardId = cardNameToId.get(r.sourceAccount.toLowerCase());
+    if (!cardId) continue;
+    const monthYm = r.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(monthYm)) continue;
+    let monthMap = counts.get(cardId);
+    if (!monthMap) {
+      monthMap = new Map();
+      counts.set(cardId, monthMap);
+    }
+    monthMap.set(monthYm, (monthMap.get(monthYm) || 0) + 1);
   }
-  const out = new Map<string, { dateFrom: string; dateTo: string; count: number }>();
-  for (const [cardId, dates] of byCard) {
-    const { dateFrom, dateTo } = dateRangeFromRows(dates.map((d) => ({ date: d })));
-    out.set(cardId, { dateFrom, dateTo, count: dates.length });
+
+  const out: CardImportLogRow[] = [];
+  for (const [cardId, monthMap] of counts) {
+    for (const [monthYm, transaction_count] of monthMap) {
+      const { dateFrom, dateTo } = calendarMonthBounds(monthYm);
+      out.push({
+        credit_card_id: cardId,
+        file_hash: `${fileHash}:${cardId}:${monthYm}`,
+        date_from: dateFrom,
+        date_to: dateTo,
+        transaction_count,
+      });
+    }
   }
   return out;
+}
+
+/** Per-card, per-month coverage for a single-card CSV import. */
+export function buildCardImportLogRowsForCard(
+  rows: { date: string }[],
+  creditCardId: string,
+  fileHash: string
+): CardImportLogRow[] {
+  const monthCounts = new Map<string, number>();
+  for (const r of rows) {
+    const monthYm = r.date.slice(0, 7);
+    if (!/^\d{4}-\d{2}$/.test(monthYm)) continue;
+    monthCounts.set(monthYm, (monthCounts.get(monthYm) || 0) + 1);
+  }
+
+  return [...monthCounts.entries()].map(([monthYm, transaction_count]) => {
+    const { dateFrom, dateTo } = calendarMonthBounds(monthYm);
+    return {
+      credit_card_id: creditCardId,
+      file_hash: `${fileHash}:${creditCardId}:${monthYm}`,
+      date_from: dateFrom,
+      date_to: dateTo,
+      transaction_count,
+    };
+  });
 }

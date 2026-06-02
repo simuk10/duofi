@@ -93,8 +93,8 @@ export default function UploadPage() {
     <Card className="p-5">
       <h4 className="text-sm text-gray-900 mb-2">Statement coverage by month</h4>
       <p className="text-xs text-gray-500 mb-4">
-        A month is covered when an uploaded statement&apos;s date range includes that
-        calendar month for that card.
+        A month is covered when that card had transactions in an uploaded file for that
+        calendar month (pre-categorized uploads log every card and month in the file).
       </p>
       {creditCards.length === 0 ? (
         <p className="text-xs text-gray-500">Add a credit card to track coverage.</p>

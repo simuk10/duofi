@@ -11,3 +11,4 @@ export { useTags } from './useTags';
 export { useRepayments } from './useRepayments';
 export { useTransactionMonthStats } from './useTransactionMonthStats';
 export type { MonthTransactionStats } from './useTransactionMonthStats';
+export { useInsightsAggregates } from './useInsightsAggregates';

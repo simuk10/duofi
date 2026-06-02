@@ -6,7 +6,9 @@
     "dev": "next dev --webpack",
     "build": "next build --webpack",
     "start": "next start",
-    "lint": "next lint"
+    "lint": "next lint",
+    "dry-run:categorize": "tsx scripts/categorization-dry-run.ts",
+    "eval:categorize": "tsx scripts/evaluate-categorization.ts scripts/fixtures/categories_rows.csv scripts/fixtures/transactions_rows.csv"
   },
   "dependencies": {
     "@serwist/next": "^9.5.7",
@@ -33,6 +35,7 @@
     "postcss": "^8.4.49",
     "serwist": "^9.5.7",
     "tailwindcss": "^3.4.17",
+    "tsx": "^4.19.2",
     "typescript": "^5.7.2"
   }
 }

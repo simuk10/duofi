@@ -23,13 +23,37 @@ import {
 } from '@/lib/utils';
 import { transactionMatchesSearch } from '@/lib/transaction-search';
 import {
-  buildLearnedCategorySuggestions,
-  getLearnedSuggestion,
-} from '@/lib/category-suggestions';
+  parseInsightsOwnerParams,
+  transactionMatchesVendorDrilldown,
+} from '@/lib/insights-vendor-drilldown';
+import {
+  buildHouseholdGuessModel,
+  guessForUncategorized,
+  confidenceTierLabel,
+  confidencePercent,
+  guessSourceHint,
+  listHighConfidenceTargets,
+  listSwipeModeQueue,
+  listOwnerReviewQueue,
+} from '@/lib/categorization-guesses';
+import type { CategoryGuess } from '@/lib/categorization-engine';
+import { HighConfidenceReviewModal } from '@/components/transactions/HighConfidenceReviewModal';
+import { CategorizationMode } from '@/components/transactions/CategorizationMode';
+import { BudgetOwnerReviewMode } from '@/components/transactions/BudgetOwnerReviewMode';
+import { CategorizationWorkflowHub } from '@/components/transactions/CategorizationWorkflowHub';
 import { CoveredSplitModal } from '@/components/covered/CoveredSplitModal';
+import { CoveredSplitSuggestionsBanner } from '@/components/covered/CoveredSplitSuggestionsBanner';
 import { addSavedFriends } from '@/lib/saved-friends';
-import { ChevronDown, Lightbulb, Search, Trash2, Upload, Users, X } from 'lucide-react';
+import {
+  dismissCoveredSuggestion,
+  getDismissedCoveredSuggestions,
+} from '@/lib/covered-split-dismissals';
+import {
+  coveredSplitSuggestionMap,
+  listCoveredSplitSuggestions,
+} from '@/lib/covered-split-suggestions';
 import Link from 'next/link';
+import { ChevronDown, Lightbulb, Search, Sparkles, Trash2, Upload, Users, X } from 'lucide-react';
 import type { Transaction, BudgetOwner, CoveredSplit } from '@/types/database';
 
 type FilterType = 'all' | 'categorized' | 'uncategorized';
@@ -61,11 +85,20 @@ function TransactionsPageContent() {
   const [bulkCategory, setBulkCategory] = useState('');
   const [bulkOwner, setBulkOwner] = useState<BudgetOwner | ''>('');
   const [bulkSaving, setBulkSaving] = useState(false);
+  const [applyAllSaving, setApplyAllSaving] = useState(false);
+  const [showHighConfidenceReview, setShowHighConfidenceReview] = useState(false);
+  const [showCategorizationMode, setShowCategorizationMode] = useState(false);
+  const [showOwnerReview, setShowOwnerReview] = useState(false);
+  const [ownerReviewDeferred, setOwnerReviewDeferred] = useState<Set<string>>(
+    () => new Set()
+  );
   const [pendingSplitAction, setPendingSplitAction] = useState<
     | { type: 'set'; split: CoveredSplit; newAmount: number }
     | { type: 'remove'; originalAmount: number }
     | null
   >(null);
+  const [dismissedCoveredIds, setDismissedCoveredIds] = useState<Set<string>>(() => new Set());
+  const [venmoReviewOnly, setVenmoReviewOnly] = useState(false);
 
   const { household, profile } = useAuth();
   const currentUserName =
@@ -81,6 +114,11 @@ function TransactionsPageContent() {
       filter: 'all',
       monthYear: selectedMonth === '' ? undefined : selectedMonth,
     });
+  const { transactions: allTransactions, refetch: refetchAllTransactions } = useTransactions({
+    householdId: household?.id ?? null,
+    filter: 'all',
+    enabled: !!household?.id,
+  });
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
 
@@ -99,7 +137,61 @@ function TransactionsPageContent() {
     return () => clearTimeout(debounceRef.current);
   }, []);
 
-  const searchActive = globalSearch.trim().length > 0;
+  const vendorKey = searchParams.get('vendor');
+  const vendorDateFrom = searchParams.get('from');
+  const vendorDateTo = searchParams.get('to');
+  const vendorDrilldownActive =
+    !!vendorKey &&
+    !!vendorDateFrom &&
+    !!vendorDateTo &&
+    /^\d{4}-\d{2}-\d{2}$/.test(vendorDateFrom) &&
+    /^\d{4}-\d{2}-\d{2}$/.test(vendorDateTo);
+
+  const {
+    transactions: vendorRangeTransactions,
+    loading: vendorDrilldownLoading,
+  } = useTransactions({
+    householdId: household?.id ?? null,
+    filter: 'all',
+    dateFrom: vendorDrilldownActive ? vendorDateFrom : undefined,
+    dateTo: vendorDrilldownActive ? vendorDateTo : undefined,
+    enabled: vendorDrilldownActive && !!household?.id,
+    skipTags: true,
+  });
+
+  const vendorDrilldownTransactions = useMemo(() => {
+    if (!vendorDrilldownActive || !vendorKey) return [];
+    const budgetOwners = parseInsightsOwnerParams(
+      searchParams.get('insightsOwner'),
+      searchParams.get('insightsPerson')
+    );
+    return vendorRangeTransactions
+      .filter((t) =>
+        transactionMatchesVendorDrilldown(t, vendorKey, {
+          dateFrom: vendorDateFrom!,
+          dateTo: vendorDateTo!,
+          budgetOwners,
+        })
+      )
+      .sort((a, b) => b.date.localeCompare(a.date) || b.id.localeCompare(a.id));
+  }, [
+    vendorDrilldownActive,
+    vendorKey,
+    vendorDateFrom,
+    vendorDateTo,
+    vendorRangeTransactions,
+    searchParams,
+  ]);
+
+  const vendorDrilldownTotal = useMemo(
+    () =>
+      Math.round(
+        vendorDrilldownTransactions.reduce((s, t) => s + Number(t.amount), 0) * 100
+      ) / 100,
+    [vendorDrilldownTransactions]
+  );
+
+  const searchActive = !vendorDrilldownActive && globalSearch.trim().length > 0;
   const {
     transactions: allTransactionsForSearch,
     loading: searchPoolLoading,
@@ -114,11 +206,15 @@ function TransactionsPageContent() {
     householdId: household?.id ?? null,
   });
 
-  const { transactions: categorizedForSuggestions } = useTransactions({
+  const { transactions: categorizedForSuggestions, refetch: refetchCategorized } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'categorized',
     enabled: !!household?.id,
   });
+
+  useEffect(() => {
+    setDismissedCoveredIds(getDismissedCoveredSuggestions());
+  }, []);
 
   useEffect(() => {
     const m = searchParams.get('month');
@@ -136,6 +232,9 @@ function TransactionsPageContent() {
       setCategoryUrlFilter(c);
     } else {
       setCategoryUrlFilter(null);
+    }
+    if (searchParams.get('venmo') === '1') {
+      setVenmoReviewOnly(true);
     }
   }, [searchParams]);
 
@@ -173,30 +272,106 @@ function TransactionsPageContent() {
     return pool.filter((t) => transactionMatchesSearch(t, debouncedSearch));
   }, [allTransactionsForSearch, debouncedSearch, searchActive, filter]);
 
+  const coveredSplitSuggestionPool = useMemo(() => {
+    if (searchActive) return searchResults;
+    if (selectedMonth === '') return allTransactions;
+    return transactions;
+  }, [searchActive, searchResults, selectedMonth, allTransactions, transactions]);
+
+  const coveredSplitSuggestions = useMemo(
+    () =>
+      listCoveredSplitSuggestions(coveredSplitSuggestionPool, {
+        dismissedIds: dismissedCoveredIds,
+        monthYear: selectedMonth || undefined,
+      }),
+    [coveredSplitSuggestionPool, dismissedCoveredIds, selectedMonth]
+  );
+
+  const coveredSuggestionById = useMemo(
+    () => coveredSplitSuggestionMap(coveredSplitSuggestions),
+    [coveredSplitSuggestions]
+  );
+
+  const flaggedTransactionIds = useMemo(
+    () => new Set(coveredSplitSuggestions.map((s) => s.transactionId)),
+    [coveredSplitSuggestions]
+  );
+
+  const visibleTransactions = useMemo(() => {
+    if (!venmoReviewOnly) return displayTransactions;
+    return displayTransactions.filter((t) => flaggedTransactionIds.has(t.id));
+  }, [displayTransactions, venmoReviewOnly, flaggedTransactionIds]);
+
+  const transactionsById = useMemo(
+    () => new Map(coveredSplitSuggestionPool.map((t) => [t.id, t])),
+    [coveredSplitSuggestionPool]
+  );
+
+  const handleDismissCoveredSuggestion = (transactionId: string) => {
+    dismissCoveredSuggestion(transactionId);
+    setDismissedCoveredIds((prev) => new Set([...prev, transactionId]));
+  };
+
   const filteredCategoryName = useMemo(
     () => categories.find((c) => c.id === categoryUrlFilter)?.name,
     [categories, categoryUrlFilter]
   );
 
-  const validCategoryIds = useMemo(
-    () => new Set(categories.map((c) => c.id)),
-    [categories]
+
+  const guessModel = useMemo(
+    () => buildHouseholdGuessModel(categorizedForSuggestions, categories),
+    [categorizedForSuggestions, categories]
   );
 
-  const learnedSuggestions = useMemo(
-    () => buildLearnedCategorySuggestions(categorizedForSuggestions),
-    [categorizedForSuggestions]
+  const guessFor = (tx: Transaction): CategoryGuess | undefined =>
+    guessForUncategorized(tx, guessModel);
+
+  const modalGuess = selectedTransaction ? guessFor(selectedTransaction) : undefined;
+  const modalGuessCategoryName = modalGuess
+    ? categories.find((c) => c.id === modalGuess.categoryId)?.name
+    : undefined;
+
+  const uncategorizedPool = useMemo(() => {
+    if (searchActive) {
+      return searchResults.filter((t) => !t.is_categorized);
+    }
+    return allTransactions.filter((t) => !t.is_categorized);
+  }, [searchActive, searchResults, allTransactions]);
+
+  const uncategorizedInListMonth = useMemo(
+    () => displayTransactions.filter((t) => !t.is_categorized).length,
+    [displayTransactions]
   );
 
-  const suggestionFor = (tx: Transaction) =>
-    getLearnedSuggestion(tx, learnedSuggestions, validCategoryIds);
+  const listHiddenByMonth =
+    !searchActive &&
+    selectedMonth !== '' &&
+    uncategorizedPool.length > 0 &&
+    uncategorizedInListMonth === 0;
 
-  const modalLearned = selectedTransaction
-    ? suggestionFor(selectedTransaction)
-    : undefined;
-  const modalLearnedCategoryName = modalLearned
-    ? categories.find((c) => c.id === modalLearned.categoryId)?.name
-    : undefined;
+  const highConfidenceTargets = useMemo(
+    () => listHighConfidenceTargets(uncategorizedPool, guessModel),
+    [uncategorizedPool, guessModel]
+  );
+
+  const swipeModeQueue = useMemo(
+    () => listSwipeModeQueue(uncategorizedPool, guessModel),
+    [uncategorizedPool, guessModel]
+  );
+
+  const ownerReviewQueue = useMemo(
+    () =>
+      listOwnerReviewQueue(uncategorizedPool, {
+        excludeIds: ownerReviewDeferred,
+      }),
+    [uncategorizedPool, ownerReviewDeferred]
+  );
+
+  const refreshAfterCategorize = () => {
+    void refetchCategorized();
+    void refetchAllTransactions();
+    if (globalSearch.trim()) void refetchSearchTransactions();
+  };
 
   const ownerLabel = (o: BudgetOwner) =>
     o === 'person_a'
@@ -206,7 +381,7 @@ function TransactionsPageContent() {
         : 'Joint';
 
   const handleApplySuggestion = async (tx: Transaction) => {
-    const s = suggestionFor(tx);
+    const s = guessFor(tx);
     if (!s) return;
     setInlineSavingId(tx.id);
     try {
@@ -217,11 +392,78 @@ function TransactionsPageContent() {
       if (globalSearch.trim()) {
         void refetchSearchTransactions();
       }
+      refreshAfterCategorize();
     } catch (error) {
       console.error('Failed to apply suggestion:', error);
     } finally {
       setInlineSavingId(null);
     }
+  };
+
+  const handleApplyReviewBatch = async (
+    items: Array<{ id: string; category_id: string; budget_owner: BudgetOwner }>
+  ) => {
+    if (items.length === 0) return;
+    setApplyAllSaving(true);
+    try {
+      const groups = new Map<string, string[]>();
+      for (const item of items) {
+        const key = `${item.category_id}|${item.budget_owner}`;
+        const ids = groups.get(key);
+        if (ids) ids.push(item.id);
+        else groups.set(key, [item.id]);
+      }
+      for (const [key, ids] of groups) {
+        const [categoryId, budgetOwner] = key.split('|') as [string, BudgetOwner];
+        await bulkUpdateTransactions(ids, { category_id: categoryId, budget_owner: budgetOwner });
+      }
+      refreshAfterCategorize();
+    } catch (error) {
+      console.error('Failed to apply reviewed suggestions:', error);
+    } finally {
+      setApplyAllSaving(false);
+    }
+  };
+
+  const handleSaveCategorization = async (payload: {
+    id: string;
+    category_id: string;
+    budget_owner: BudgetOwner;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+      budget_owner: payload.budget_owner,
+    });
+    refreshAfterCategorize();
+  };
+
+  const handleSaveCategoryOnly = async (payload: {
+    id: string;
+    category_id: string;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+    });
+    refreshAfterCategorize();
+  };
+
+  const handleAssignOwner = async (payload: {
+    id: string;
+    budget_owner: BudgetOwner;
+  }) => {
+    await updateTransaction(payload.id, {
+      budget_owner: payload.budget_owner,
+    });
+    setOwnerReviewDeferred((prev) => {
+      const next = new Set(prev);
+      next.delete(payload.id);
+      return next;
+    });
+    refreshAfterCategorize();
+  };
+
+  const handleDeferOwnerReview = (id: string) => {
+    setOwnerReviewDeferred((prev) => new Set(prev).add(id));
   };
 
   const clearCategoryFilter = () => {
@@ -232,8 +474,19 @@ function TransactionsPageContent() {
     router.replace(q ? `/transactions?${q}` : '/transactions');
   };
 
+  const clearVendorDrilldown = () => {
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete('vendor');
+    params.delete('from');
+    params.delete('to');
+    params.delete('insightsOwner');
+    params.delete('insightsPerson');
+    const q = params.toString();
+    router.replace(q ? `/transactions?${q}` : '/transactions');
+  };
+
   const isPersonB = profile?.role === 'person_b';
-  const budgetOwnerOptions = isPersonB
+  const budgetOwnerOptions: { value: BudgetOwner; label: string }[] = isPersonB
     ? [
         { value: 'person_b', label: household?.person_b_name || 'Person B' },
         { value: 'person_a', label: household?.person_a_name || 'Person A' },
@@ -260,7 +513,7 @@ function TransactionsPageContent() {
 
   const handleOpenEdit = (tx: Transaction) => {
     setSelectedTransaction(tx);
-    const sug = suggestionFor(tx);
+    const sug = guessFor(tx);
     setCategoryId(tx.category_id || sug?.categoryId || '');
     setBudgetOwner(tx.budget_owner || sug?.budgetOwner || '');
     setAmountInput(String(tx.amount));
@@ -322,6 +575,7 @@ function TransactionsPageContent() {
       if (globalSearch.trim()) {
         void refetchSearchTransactions();
       }
+      refreshAfterCategorize();
       setSelectedTransaction(null);
       setNewTagInput('');
       setPendingSplitAction(null);
@@ -427,15 +681,27 @@ function TransactionsPageContent() {
   };
 
   const renderTransactionCard = (tx: Transaction) => {
-    const learned = !tx.is_categorized ? suggestionFor(tx) : undefined;
-    const learnedCategoryName = learned
-      ? categories.find((c) => c.id === learned.categoryId)?.name
+    const guess = !tx.is_categorized ? guessFor(tx) : undefined;
+    const coveredHint = coveredSuggestionById.get(tx.id);
+    const guessCategoryName = guess
+      ? categories.find((c) => c.id === guess.categoryId)?.name
       : undefined;
+    const suggestionBorder =
+      guess?.confidenceTier === 'high'
+        ? 'border-emerald-100 bg-emerald-50/90'
+        : guess?.confidenceTier === 'guess' || guess?.confidenceTier === 'low'
+          ? 'border-gray-200 bg-gray-50/90'
+          : 'border-amber-100 bg-amber-50/90';
     const isBulkExcluded = bulkExcluded.has(tx.id);
     const showBulkExclude = searchActive && !tx.is_categorized && (bulkCategory || bulkOwner);
 
     return (
-    <Card key={tx.id} className={`p-4 ${isBulkExcluded ? 'opacity-40' : ''}`}>
+    <Card
+      key={tx.id}
+      className={`p-4 ${isBulkExcluded ? 'opacity-40' : ''} ${
+        coveredHint && !tx.is_covered ? 'border-amber-200 bg-amber-50/35' : ''
+      }`}
+    >
       <div className="flex items-start gap-2">
         <div
           role="button"
@@ -497,24 +763,30 @@ function TransactionsPageContent() {
       )}
       </div>
 
-      {learned && learnedCategoryName && (
-        <div className="mt-3 flex flex-wrap items-center gap-2 rounded-lg border border-amber-100 bg-amber-50/90 px-3 py-2">
+      {guess && guessCategoryName && (
+        <div className={`mt-3 flex flex-wrap items-center gap-2 rounded-lg border px-3 py-2 ${suggestionBorder}`}>
           <div className="flex min-w-0 flex-1 items-start gap-2">
             <Lightbulb
               className="mt-0.5 h-4 w-4 shrink-0 text-amber-600"
               aria-hidden
             />
-            <p className="text-xs text-amber-950">
-              <span className="font-medium">Suggested</span> from {learned.basedOnCount} past
-              match{learned.basedOnCount === 1 ? '' : 'es'}:{' '}
+            <p className="text-xs text-gray-900">
+              <span className="font-medium">{confidenceTierLabel(guess.confidenceTier)}</span>
+              {' '}({confidencePercent(guess.confidence)}% · {guessSourceHint(guess.source)}):{' '}
               <span className="font-medium">
                 {categoryIconToEmoji(
-                  categories.find((c) => c.id === learned.categoryId)?.icon,
-                  learnedCategoryName
+                  categories.find((c) => c.id === guess.categoryId)?.icon,
+                  guessCategoryName
                 )}{' '}
-                {learnedCategoryName}
+                {guessCategoryName}
               </span>
-              <span className="text-amber-800"> · {ownerLabel(learned.budgetOwner)}</span>
+              <span className="text-gray-700"> · {ownerLabel(guess.budgetOwner)}</span>
+              {guess.basedOnCount > 0 && (
+                <span className="text-gray-500">
+                  {' '}
+                  · {guess.basedOnCount} past match{guess.basedOnCount === 1 ? '' : 'es'}
+                </span>
+              )}
             </p>
           </div>
           <button
@@ -575,12 +847,18 @@ function TransactionsPageContent() {
           />
         </div>
       </div>
-      {(tx.is_covered || (tx.tags && tx.tags.length > 0)) && (
+      {(tx.is_covered || coveredHint || (tx.tags && tx.tags.length > 0)) && (
         <div className="mt-2 flex flex-wrap items-center gap-1">
           {tx.is_covered && (
             <span className="inline-flex items-center gap-0.5 rounded-full border border-teal-200/90 bg-teal-50/70 px-2 py-0.5 text-[10px] font-medium text-[#0D9488]">
               <Users className="h-2.5 w-2.5" />
               group split
+            </span>
+          )}
+          {coveredHint && !tx.is_covered && (
+            <span className="inline-flex items-center gap-0.5 rounded-full border border-amber-200/90 bg-amber-50/90 px-2 py-0.5 text-[10px] font-medium text-amber-800">
+              <Users className="h-2.5 w-2.5" />
+              might need Venmo
             </span>
           )}
           {tx.tags?.slice(0, 5).map((tag) => (
@@ -619,6 +897,17 @@ function TransactionsPageContent() {
         }}
       />
 
+      {!searchActive && !vendorDrilldownActive && (
+        <CoveredSplitSuggestionsBanner
+          suggestions={coveredSplitSuggestions}
+          transactionsById={transactionsById}
+          venmoReviewOnly={venmoReviewOnly}
+          onToggleFilter={() => setVenmoReviewOnly((v) => !v)}
+          onDismiss={handleDismissCoveredSuggestion}
+          onOpenTransaction={handleOpenEdit}
+        />
+      )}
+
       <div className="border-b border-gray-200 bg-white px-4 pb-3 pt-2">
         <div className="relative mb-3">
           <Search
@@ -651,7 +940,7 @@ function TransactionsPageContent() {
         </p>
         <div
           className={`flex gap-0.5 rounded-full bg-gray-100 p-1 ${
-            searchActive ? 'pointer-events-none opacity-40' : ''
+            searchActive || vendorDrilldownActive ? 'pointer-events-none opacity-40' : ''
           }`}
         >
           <button
@@ -710,10 +999,55 @@ function TransactionsPageContent() {
             </button>
           </div>
         )}
+        {vendorDrilldownActive && vendorKey && (
+          <div className="mt-2 flex items-center justify-between gap-2 rounded-lg bg-teal-50 px-3 py-2 text-xs text-gray-700">
+            <span className="min-w-0">
+              Vendor:{' '}
+              <span className="font-medium">{vendorKey}</span>
+              <span className="text-gray-500">
+                {' '}
+                · {formatDate(vendorDateFrom!)} – {formatDate(vendorDateTo!)}
+              </span>
+            </span>
+            <button
+              type="button"
+              onClick={clearVendorDrilldown}
+              className="flex shrink-0 items-center gap-0.5 font-medium text-[#0D9488]"
+            >
+              <X className="h-3.5 w-3.5" />
+              Clear
+            </button>
+          </div>
+        )}
       </div>
 
       <div className="flex-1 overflow-y-auto px-4 pb-20 pt-4">
-        {searchActive ? (
+        {vendorDrilldownActive ? (
+          vendorDrilldownLoading ? (
+            <div className="flex items-center justify-center py-12">
+              <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#14B8A6] border-t-transparent" />
+            </div>
+          ) : vendorDrilldownTransactions.length === 0 ? (
+            <div className="py-12 text-center">
+              <h3 className="mb-2 text-lg text-gray-900">No transactions</h3>
+              <p className="mb-4 text-sm text-gray-600">
+                No transactions matched &quot;{vendorKey}&quot; for this Insights period.
+              </p>
+              <Button variant="outline" onClick={clearVendorDrilldown}>
+                Clear vendor filter
+              </Button>
+            </div>
+          ) : (
+            <div className="space-y-3">
+              <p className="text-center text-xs text-gray-500">
+                {vendorDrilldownTransactions.length} transaction
+                {vendorDrilldownTransactions.length === 1 ? '' : 's'} ·{' '}
+                {formatCurrency(vendorDrilldownTotal)} total · Insights range
+              </p>
+              {vendorDrilldownTransactions.map((tx) => renderTransactionCard(tx))}
+            </div>
+          )
+        ) : searchActive ? (
           searchPoolLoading ? (
             <div className="flex items-center justify-center py-12">
               <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#14B8A6] border-t-transparent" />
@@ -737,6 +1071,21 @@ function TransactionsPageContent() {
               <p className="text-center text-xs text-gray-500">
                 {searchResults.length} result{searchResults.length === 1 ? '' : 's'} · all months
               </p>
+
+              {highConfidenceTargets.length > 0 && (
+                <Card className="border-emerald-200/80 bg-gradient-to-r from-emerald-50/90 to-teal-50/80 p-4">
+                  <p className="text-sm font-medium text-gray-900">
+                    {highConfidenceTargets.length} high-confidence suggestion
+                    {highConfidenceTargets.length === 1 ? '' : 's'} in results
+                  </p>
+                  <Button
+                    className="mt-3"
+                    onClick={() => setShowHighConfidenceReview(true)}
+                  >
+                    Review & apply
+                  </Button>
+                </Card>
+              )}
 
               {searchResults.some((t) => !t.is_categorized) && (
                 <Card className="p-4 border-[#14B8A6]/30 bg-gradient-to-r from-[#14B8A6]/5 to-[#0891B2]/5">
@@ -802,7 +1151,7 @@ function TransactionsPageContent() {
           <div className="flex items-center justify-center py-12">
             <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#14B8A6] border-t-transparent" />
           </div>
-        ) : displayTransactions.length === 0 ? (
+        ) : displayTransactions.length === 0 && !venmoReviewOnly ? (
           <div className="py-12 text-center">
             <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-gradient-to-br from-[#14B8A6]/20 to-[#0891B2]/20">
               <Upload className="h-8 w-8 text-[#0891B2]" />
@@ -816,9 +1165,87 @@ function TransactionsPageContent() {
               </Button>
             </Link>
           </div>
+        ) : visibleTransactions.length === 0 ? (
+          <div className="py-12 text-center">
+            <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-amber-100">
+              <Users className="h-8 w-8 text-amber-700" />
+            </div>
+            <h3 className="mb-2 text-lg text-gray-900">No flagged group tabs</h3>
+            <p className="mb-4 text-sm text-gray-600">
+              Nothing in this view looks like a tab you covered for friends.
+            </p>
+            <Button variant="outline" onClick={() => setVenmoReviewOnly(false)}>
+              Show all transactions
+            </Button>
+          </div>
         ) : (
           <div className="space-y-3">
-            {displayTransactions.map((tx) => renderTransactionCard(tx))}
+            {highConfidenceTargets.length > 0 && filter !== 'categorized' && (
+              <Card className="border-emerald-200/80 bg-gradient-to-r from-emerald-50/90 to-teal-50/80 p-4">
+                <p className="text-sm font-medium text-gray-900">
+                  {highConfidenceTargets.length} high-confidence suggestion
+                  {highConfidenceTargets.length === 1 ? '' : 's'} ready
+                </p>
+                <p className="mt-1 text-xs text-gray-600">
+                  Review the list before applying — fix any mistakes one-by-one.
+                </p>
+                <Button className="mt-3" onClick={() => setShowHighConfidenceReview(true)}>
+                  Review & apply
+                </Button>
+              </Card>
+            )}
+            {swipeModeQueue.length > 0 && filter !== 'categorized' && (
+              <Card className="border-violet-200/80 bg-gradient-to-r from-violet-50/80 to-fuchsia-50/60 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100">
+                    <Sparkles className="h-5 w-5 text-violet-600" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">
+                      {swipeModeQueue.length} need a category
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Swipe to confirm or fix the suggested category — owners come next.
+                    </p>
+                    <Button
+                      variant="secondary"
+                      size="sm"
+                      className="mt-3"
+                      onClick={() => setShowCategorizationMode(true)}
+                    >
+                      Start categorization mode
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+            {ownerReviewQueue.length > 0 && filter !== 'categorized' && (
+              <Card className="border-sky-200/80 bg-gradient-to-r from-sky-50/90 to-cyan-50/70 p-4">
+                <div className="flex items-start gap-3">
+                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100">
+                    <Users className="h-5 w-5 text-sky-600" />
+                  </div>
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-medium text-gray-900">
+                      {ownerReviewQueue.length} need a budget owner
+                    </p>
+                    <p className="mt-1 text-xs text-gray-600">
+                      Swipe → {household?.person_a_name || 'Person A'} · ←{' '}
+                      {household?.person_b_name || 'Person B'} · ↑ Joint · ↓ later
+                    </p>
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="mt-3 border-sky-200 bg-white"
+                      onClick={() => setShowOwnerReview(true)}
+                    >
+                      Start owner review
+                    </Button>
+                  </div>
+                </div>
+              </Card>
+            )}
+            {visibleTransactions.map((tx) => renderTransactionCard(tx))}
           </div>
         )}
       </div>
@@ -834,7 +1261,7 @@ function TransactionsPageContent() {
       >
         {selectedTransaction && (
           <div className="space-y-4">
-            {modalLearned && modalLearnedCategoryName && (
+            {modalGuess && modalGuessCategoryName && (
               <div className="flex flex-wrap items-center gap-2 rounded-xl border border-amber-100 bg-amber-50/90 px-4 py-3">
                 <div className="flex min-w-0 flex-1 items-start gap-2">
                   <Lightbulb
@@ -842,26 +1269,26 @@ function TransactionsPageContent() {
                     aria-hidden
                   />
                   <p className="text-xs text-amber-950">
-                    <span className="font-medium">Suggested</span> from {modalLearned.basedOnCount}{' '}
-                    past match{modalLearned.basedOnCount === 1 ? '' : 'es'}:{' '}
+                    <span className="font-medium">{confidenceTierLabel(modalGuess.confidenceTier)}</span>
+                    {' '}({confidencePercent(modalGuess.confidence)}%):{' '}
                     <span className="font-medium">
                       {categoryIconToEmoji(
-                        categories.find((c) => c.id === modalLearned.categoryId)?.icon,
-                        modalLearnedCategoryName
+                        categories.find((c) => c.id === modalGuess.categoryId)?.icon,
+                        modalGuessCategoryName
                       )}{' '}
-                      {modalLearnedCategoryName}
+                      {modalGuessCategoryName}
                     </span>
                     <span className="text-amber-800">
                       {' '}
-                      · {ownerLabel(modalLearned.budgetOwner)}
+                      · {ownerLabel(modalGuess.budgetOwner)}
                     </span>
                   </p>
                 </div>
                 <button
                   type="button"
                   onClick={() => {
-                    setCategoryId(modalLearned.categoryId);
-                    setBudgetOwner(modalLearned.budgetOwner);
+                    setCategoryId(modalGuess.categoryId);
+                    setBudgetOwner(modalGuess.budgetOwner);
                   }}
                   className="shrink-0 rounded-lg border border-amber-200/80 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 shadow-sm transition-colors hover:bg-amber-100/80"
                 >
@@ -992,6 +1419,34 @@ function TransactionsPageContent() {
             {saveError && (
               <p className="text-sm text-[#EF4444]">{saveError}</p>
             )}
+
+            {selectedTransaction &&
+              coveredSuggestionById.get(selectedTransaction.id) &&
+              !selectedTransaction.is_covered &&
+              pendingSplitAction?.type !== 'set' && (
+                <div className="rounded-xl border border-amber-200 bg-amber-50/70 p-3">
+                  <p className="text-sm font-medium text-gray-900">Might be a group tab</p>
+                  <p className="mt-1 text-xs text-gray-600">
+                    {coveredSuggestionById.get(selectedTransaction.id)?.hint}
+                  </p>
+                  <div className="mt-2 flex gap-2">
+                    <button
+                      type="button"
+                      onClick={() => setShowCoveredModal(true)}
+                      className="rounded-lg bg-amber-100 px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-200"
+                    >
+                      Split with friends
+                    </button>
+                    <button
+                      type="button"
+                      onClick={() => handleDismissCoveredSuggestion(selectedTransaction.id)}
+                      className="rounded-lg px-3 py-1.5 text-xs font-medium text-gray-600 hover:bg-gray-100"
+                    >
+                      Not a group tab
+                    </button>
+                  </div>
+                </div>
+              )}
 
             {(() => {
               const activeSplit =
@@ -1189,6 +1644,37 @@ function TransactionsPageContent() {
           }}
         />
       )}
+
+      <HighConfidenceReviewModal
+        isOpen={showHighConfidenceReview}
+        onClose={() => setShowHighConfidenceReview(false)}
+        targets={highConfidenceTargets}
+        categories={categories}
+        ownerLabel={ownerLabel}
+        budgetOwnerOptions={budgetOwnerOptions}
+        onApplyBatch={handleApplyReviewBatch}
+        onSaveCorrection={handleSaveCategorization}
+      />
+
+      <CategorizationMode
+        isOpen={showCategorizationMode}
+        onClose={() => setShowCategorizationMode(false)}
+        queue={swipeModeQueue}
+        categories={categories}
+        onCategorize={handleSaveCategoryOnly}
+        onComplete={() => setShowOwnerReview(true)}
+      />
+
+      <BudgetOwnerReviewMode
+        isOpen={showOwnerReview}
+        onClose={() => setShowOwnerReview(false)}
+        queue={ownerReviewQueue}
+        categories={categories}
+        personAName={household?.person_a_name || 'Person A'}
+        personBName={household?.person_b_name || 'Person B'}
+        onAssignOwner={handleAssignOwner}
+        onDefer={handleDeferOwnerReview}
+      />
     </AppLayout>
   );
 }

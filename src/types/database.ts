@@ -192,7 +192,15 @@ export interface Database {
       [_ in never]: never;
     };
     Functions: {
-      [_ in never]: never;
+      get_insights_aggregates: {
+        Args: {
+          p_date_from: string;
+          p_date_to: string;
+          p_budget_owners?: BudgetOwner[] | null;
+          p_anchor_month?: string | null;
+        };
+        Returns: Record<string, unknown>;
+      };
     };
   };
 }

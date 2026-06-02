@@ -9,6 +9,7 @@ import {
   Modal,
 } from '@/components/ui';
 import { PendingRequests } from '@/components/covered/PendingRequests';
+import { CoveredSplitReminders } from '@/components/covered/CoveredSplitReminders';
 import { useAuth, useTransactions, useRepayments } from '@/hooks';
 import { calculateSettlement } from '@/lib/settlement';
 import { formatCurrency, formatDate } from '@/lib/utils';
@@ -32,6 +33,13 @@ export default function SettlementPage() {
   const { transactions, loading: txLoading } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'categorized',
+  });
+  const { transactions: allTransactionsForVenmo } = useTransactions({
+    householdId: household?.id ?? null,
+    filter: 'all',
+    enabled: !!household?.id,
+    skipTags: true,
+    includeCreditCard: false,
   });
   const {
     repayments,
@@ -315,7 +323,8 @@ export default function SettlementPage() {
             </Card>
 
             {/* Venmo Requests — segmented by person */}
-            <div className="mt-6">
+            <div className="mt-6 space-y-4">
+              <CoveredSplitReminders transactions={allTransactionsForVenmo} />
               <PendingRequests
                 householdId={household?.id ?? null}
                 personAName={household?.person_a_name || 'Person A'}

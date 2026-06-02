@@ -5,8 +5,8 @@ import Link from 'next/link';
 import { AppLayout } from '@/components/layout';
 import { Button } from '@/components/ui';
 import { InsightsDashboard } from '@/components/insights/InsightsDashboard';
-import { useAuth, useTransactions } from '@/hooks';
-import { buildInsightsDashboardModel } from '@/lib/insights-dashboard';
+import { useAuth, useInsightsAggregates } from '@/hooks';
+import { buildInsightsDashboardFromAggregates } from '@/lib/insights-aggregates';
 import { getChartMonthWindow, getLatestCompleteMonthYear } from '@/lib/utils';
 import { Upload } from 'lucide-react';
 
@@ -61,34 +61,25 @@ export default function InsightsPage() {
       if (profile.role === 'person_b') setSelectedPerson('B');
     }
   }, [profile]);
-  const { transactions, loading } = useTransactions({
+
+  const { aggregates, loading, hasData } = useInsightsAggregates({
     householdId: household?.id ?? null,
-    filter: 'all',
     dateFrom,
     dateTo,
+    anchorMonth,
+    ownerFilter,
+    selectedPerson,
   });
 
-  const filteredTransactions = useMemo(() => {
-    const personalOwner = selectedPerson === 'A' ? 'person_a' : 'person_b';
-    if (ownerFilter === 'personal') {
-      return transactions.filter((t) => t.budget_owner === personalOwner);
-    }
-    if (ownerFilter === 'joint') {
-      return transactions.filter((t) => t.budget_owner === 'joint');
-    }
-    return transactions.filter(
-      (t) => t.budget_owner === personalOwner || t.budget_owner === 'joint'
-    );
-  }, [transactions, ownerFilter, selectedPerson]);
+  const initialLoad = loading && !aggregates;
 
-  const model = useMemo(
-    () =>
-      buildInsightsDashboardModel(filteredTransactions, keys, anchorMonth, {
-        personAName: household?.person_a_name ?? 'Person A',
-        personBName: household?.person_b_name ?? 'Person B',
-      }),
-    [filteredTransactions, keys, anchorMonth, household?.person_a_name, household?.person_b_name]
-  );
+  const model = useMemo(() => {
+    if (!aggregates) return null;
+    return buildInsightsDashboardFromAggregates(aggregates, keys, anchorMonth, {
+      personAName: household?.person_a_name ?? 'Person A',
+      personBName: household?.person_b_name ?? 'Person B',
+    });
+  }, [aggregates, keys, anchorMonth, household?.person_a_name, household?.person_b_name]);
 
   const rangeLabel = (() => {
     if (rangePreset === 'custom' && customFrom && customTo)
@@ -99,11 +90,11 @@ export default function InsightsPage() {
 
   return (
     <AppLayout>
-      {loading ? (
+      {initialLoad ? (
         <div className="flex min-h-[50vh] items-center justify-center bg-[#F9FAFB]">
           <div className="h-8 w-8 animate-spin rounded-full border-4 border-[#14B8A6] border-t-transparent" />
         </div>
-      ) : transactions.length === 0 ? (
+      ) : !hasData && !loading ? (
         <div className="bg-[#F9FAFB] px-4 pb-24 pt-8">
           <div className="rounded-xl border border-dashed border-gray-200 bg-white p-8 text-center">
             <p className="text-sm text-gray-600">
@@ -117,11 +108,14 @@ export default function InsightsPage() {
             </Link>
           </div>
         </div>
-      ) : (
+      ) : model ? (
         <InsightsDashboard
           model={model}
+          loading={loading}
           rangePreset={rangePreset}
           rangeLabel={rangeLabel}
+          insightsDateFrom={dateFrom}
+          insightsDateTo={dateTo}
           onRangePresetChange={setRangePreset}
           customFrom={customFrom}
           customTo={customTo}
@@ -135,7 +129,7 @@ export default function InsightsPage() {
           personBLabel={household?.person_b_name ?? 'Person B'}
           isPersonB={isPersonB}
         />
-      )}
+      ) : null}
     </AppLayout>
   );
 }

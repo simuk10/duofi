@@ -11,7 +11,8 @@ import {
 import { suggestEmojiFromCategoryName } from '@/lib/category-icons';
 import {
   dateRangeFromRows,
-  groupedDateRangesByCardName,
+  buildCardImportLogRowsForCard,
+  buildCardImportLogRowsFromCategorized,
 } from '@/lib/card-import-utils';
 
 function mapTransactionRow(row: Record<string, unknown>): Transaction {
@@ -86,6 +87,10 @@ interface UseTransactionsOptions {
   enabled?: boolean;
   /** Server-side description search (ilike). Skips tag loading for speed. */
   searchTerm?: string;
+  /** Skip per-transaction tag lookup (charts, insights). */
+  skipTags?: boolean;
+  /** Omit credit_card join when card metadata is not needed. */
+  includeCreditCard?: boolean;
 }
 
 export function useTransactions({
@@ -99,6 +104,8 @@ export function useTransactions({
   tagFilterIds,
   enabled = true,
   searchTerm,
+  skipTags = false,
+  includeCreditCard = true,
 }: UseTransactionsOptions) {
   const [transactions, setTransactions] = useState<Transaction[]>([]);
   const [loading, setLoading] = useState(true);
@@ -152,13 +159,13 @@ export function useTransactions({
         }
       }
 
+      const selectCols = includeCreditCard
+        ? '*, category:categories(*), credit_card:credit_cards(*)'
+        : '*, category:categories(*)';
+
       let query = supabase
         .from('transactions')
-        .select(`
-          *,
-          category:categories(*),
-          credit_card:credit_cards(*)
-        `)
+        .select(selectCols)
         .eq('household_id', householdId)
         .order('date', { ascending: false });
 
@@ -202,12 +209,12 @@ export function useTransactions({
 
       if (fetchError) throw fetchError;
 
-      const rows = (data || []) as Record<string, unknown>[];
+      const rows = (data || []) as unknown as Record<string, unknown>[];
       const base = rows.map((row) =>
         mapTransactionRow({ ...row, transaction_tags: undefined })
       );
 
-      if (searchTerm) {
+      if (searchTerm || skipTags) {
         setTransactions(base.map((t) => ({ ...t, tags: [] })));
       } else {
         const tagMap = await loadTagsForTransactions(
@@ -234,6 +241,8 @@ export function useTransactions({
     tagFilterIds,
     enabled,
     searchTerm,
+    skipTags,
+    includeCreditCard,
     supabase,
   ]);
 
@@ -388,15 +397,14 @@ export function useTransactions({
     if (insertError) throw insertError;
 
     if (meta?.fileHash && transactions.length > 0) {
-      const { dateFrom, dateTo } = dateRangeFromRows(transactions);
-      const { error: importLogError } = await supabase.from('card_imports').insert({
-        household_id: householdId,
-        credit_card_id: creditCardId,
-        file_hash: meta.fileHash,
-        date_from: dateFrom,
-        date_to: dateTo,
-        transaction_count: transactions.length,
-      } as never);
+      const importRows = buildCardImportLogRowsForCard(
+        transactions,
+        creditCardId,
+        meta.fileHash
+      ).map((row) => ({ household_id: householdId, ...row }));
+      const { error: importLogError } = await supabase
+        .from('card_imports')
+        .insert(importRows as never);
       if (importLogError) throw importLogError;
     }
 
@@ -505,20 +513,11 @@ export function useTransactions({
       for (const [name, c] of cardsByName) {
         cardNameToId.set(name, c.id);
       }
-      const grouped = groupedDateRangesByCardName(
+      const importRows = buildCardImportLogRowsFromCategorized(
         rows.map((r) => ({ date: r.date, sourceAccount: r.sourceAccount })),
-        cardNameToId
-      );
-      const importRows = [...grouped.entries()].map(
-        ([creditCardId, v]) => ({
-          household_id: householdId,
-          credit_card_id: creditCardId,
-          file_hash: meta.fileHash,
-          date_from: v.dateFrom,
-          date_to: v.dateTo,
-          transaction_count: v.count,
-        })
-      );
+        cardNameToId,
+        meta.fileHash
+      ).map((row) => ({ household_id: householdId, ...row }));
       if (importRows.length > 0) {
         const { error: importLogError } = await supabase
           .from('card_imports')

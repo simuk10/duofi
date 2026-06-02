@@ -15,8 +15,17 @@ import {
   ResponsiveContainer,
   Legend,
 } from 'recharts';
-import { ChevronDown, User, TrendingUp, TrendingDown, AlertCircle, Check } from 'lucide-react';
+import {
+  ChevronDown,
+  ChevronRight,
+  User,
+  TrendingUp,
+  TrendingDown,
+  AlertCircle,
+  Check,
+} from 'lucide-react';
 import { formatCurrency } from '@/lib/utils';
+import { buildInsightsVendorTransactionsUrl } from '@/lib/insights-vendor-drilldown';
 import { INSIGHT_CHART_COLORS, type InsightsDashboardModel } from '@/lib/insights-dashboard';
 import type {
   InsightRangePreset,
@@ -35,8 +44,11 @@ const RANGE_OPTIONS: { value: InsightRangePreset | 'custom'; label: string }[] =
 
 interface Props {
   model: InsightsDashboardModel;
+  loading?: boolean;
   rangePreset: InsightRangePreset | 'custom';
   rangeLabel: string;
+  insightsDateFrom: string;
+  insightsDateTo: string;
   onRangePresetChange: (m: InsightRangePreset | 'custom') => void;
   customFrom: string;
   customTo: string;
@@ -53,8 +65,11 @@ interface Props {
 
 export function InsightsDashboard({
   model,
+  loading = false,
   rangePreset,
   rangeLabel,
+  insightsDateFrom,
+  insightsDateTo,
   onRangePresetChange,
   customFrom,
   customTo,
@@ -114,6 +129,12 @@ export function InsightsDashboard({
         <div className="mb-2 flex items-center justify-between">
           <h1 className="text-xl tracking-tight text-gray-900">Insights</h1>
           <div className="flex items-center gap-3">
+            {loading && (
+              <div
+                className="h-4 w-4 animate-spin rounded-full border-2 border-[#14B8A6] border-t-transparent"
+                aria-label="Updating insights"
+              />
+            )}
             {/* Range dropdown */}
             <div className="relative" ref={dropdownRef}>
               <button
@@ -488,20 +509,34 @@ export function InsightsDashboard({
             <div className="space-y-3">
               {topVendors.map((vendor, index) => (
                 <div key={vendor.name}>
-                  <div className="mb-1.5 flex items-center justify-between">
+                  <Link
+                    href={buildInsightsVendorTransactionsUrl({
+                      vendor: vendor.name,
+                      dateFrom: insightsDateFrom,
+                      dateTo: insightsDateTo,
+                      ownerFilter,
+                      selectedPerson,
+                    })}
+                    className="group mb-1.5 flex items-center justify-between gap-2 rounded-lg py-1 -mx-1 px-1 transition-colors hover:bg-gray-50"
+                  >
                     <div className="flex min-w-0 items-center gap-2">
                       <div className="flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-gradient-to-br from-[#14B8A6]/20 to-[#0891B2]/20">
                         <span className="text-xs text-[#0891B2]">{index + 1}</span>
                       </div>
-                      <span className="truncate text-sm text-gray-900">{vendor.name}</span>
+                      <span className="truncate text-sm text-gray-900 group-hover:text-[#0D9488]">
+                        {vendor.name}
+                      </span>
                     </div>
-                    <div className="shrink-0 text-right">
-                      <p className="text-sm tabular-nums text-gray-900">
-                        {formatCurrency(vendor.total)}
-                      </p>
-                      <p className="text-xs text-gray-500">{vendor.count} visits</p>
+                    <div className="flex shrink-0 items-center gap-1 text-right">
+                      <div>
+                        <p className="text-sm tabular-nums text-gray-900">
+                          {formatCurrency(vendor.total)}
+                        </p>
+                        <p className="text-xs text-gray-500">{vendor.count} visits</p>
+                      </div>
+                      <ChevronRight className="h-4 w-4 text-gray-300 group-hover:text-[#14B8A6]" />
                     </div>
-                  </div>
+                  </Link>
                   {index < topVendors.length - 1 && <div className="mt-3 h-px bg-gray-100" />}
                 </div>
               ))}

@@ -1,0 +1,9 @@
+{
+  "$comment": "DRAFT — merge crons into vercel.json when enabling Plaid (not active now)",
+  "crons": [
+    {
+      "path": "/api/plaid/cron-sync",
+      "schedule": "0 6 * * *"
+    }
+  ]
+}

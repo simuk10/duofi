@@ -9,6 +9,6 @@ export { useCreditCards } from './useCreditCards';
 export { useCardImports } from './useCardImports';
 export { useTags } from './useTags';
 export { useRepayments } from './useRepayments';
-export { useTransactionMonthStats } from './useTransactionMonthStats';
+export { useTransactionMonthStats, buildMonthTransactionStats } from './useTransactionMonthStats';
 export type { MonthTransactionStats } from './useTransactionMonthStats';
 export { useInsightsAggregates } from './useInsightsAggregates';

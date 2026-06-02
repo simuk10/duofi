@@ -6,9 +6,10 @@ import { categoryIconToEmoji } from '@/lib/category-icons';
 import { formatCurrency, formatDate } from '@/lib/utils';
 import {
   ArrowDown,
+  ArrowLeft,
+  ArrowRight,
   ArrowUp,
   Check,
-  Users,
   X,
 } from 'lucide-react';
 import type { BudgetOwner, Category, Transaction } from '@/types/database';
@@ -134,8 +135,8 @@ export function BudgetOwnerReviewMode({
 
   if (remaining.length === 0) {
     return (
-      <div className="fixed inset-0 z-50 flex flex-col items-center justify-center bg-gradient-to-b from-[#0891B2]/10 to-white px-6">
-        <div className="max-w-sm text-center">
+      <div className="fixed inset-0 z-50 flex items-center justify-center bg-gray-900/30 px-6 backdrop-blur-[2px]">
+        <div className="w-full max-w-sm rounded-2xl border border-gray-200 bg-white p-6 text-center shadow-xl">
           <div className="mx-auto mb-4 flex h-16 w-16 items-center justify-center rounded-full bg-sky-100">
             <Check className="h-8 w-8 text-sky-600" />
           </div>
@@ -198,13 +199,13 @@ export function BudgetOwnerReviewMode({
             Later ↓
           </div>
           <div
-            className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-rose-300 bg-rose-50 px-2 py-1 text-xs font-semibold text-rose-700"
+            className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
             style={{ opacity: personBOpacity }}
           >
             {personBName}
           </div>
           <div
-            className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-teal-300 bg-teal-50 px-2 py-1 text-xs font-semibold text-teal-800"
+            className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
             style={{ opacity: personAOpacity }}
           >
             {personAName}
@@ -271,9 +272,9 @@ export function BudgetOwnerReviewMode({
             type="button"
             disabled={saving}
             onClick={() => void assignAndAdvance('person_b')}
-            className="flex flex-col items-center gap-1 rounded-xl border border-rose-200 bg-rose-50/80 py-3 text-xs font-medium text-rose-800 transition active:scale-95 disabled:opacity-50"
+            className="flex flex-col items-center gap-1 rounded-xl border border-blue-200 bg-blue-50/80 py-3 text-xs font-medium text-blue-800 transition active:scale-95 disabled:opacity-50"
           >
-            <X className="h-5 w-5" />
+            <ArrowLeft className="h-5 w-5" />
             {personBName}
           </button>
           <button
@@ -291,16 +292,16 @@ export function BudgetOwnerReviewMode({
             onClick={() => void assignAndAdvance('joint')}
             className="flex flex-col items-center gap-1 rounded-xl border border-violet-200 bg-violet-50/80 py-3 text-xs font-medium text-violet-800 transition active:scale-95 disabled:opacity-50"
           >
-            <Users className="h-5 w-5" />
+            <ArrowUp className="h-5 w-5" />
             Joint
           </button>
           <button
             type="button"
             disabled={saving}
             onClick={() => void assignAndAdvance('person_a')}
-            className="flex flex-col items-center gap-1 rounded-xl border border-teal-200 bg-teal-50/80 py-3 text-xs font-medium text-teal-800 transition active:scale-95 disabled:opacity-50"
+            className="flex flex-col items-center gap-1 rounded-xl border border-blue-200 bg-blue-50/80 py-3 text-xs font-medium text-blue-800 transition active:scale-95 disabled:opacity-50"
           >
-            <Check className="h-5 w-5" />
+            <ArrowRight className="h-5 w-5" />
             {personAName}
           </button>
         </div>

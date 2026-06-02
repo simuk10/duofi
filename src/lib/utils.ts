@@ -52,6 +52,13 @@ export function getMonthYearDisplay(monthYear: string): string {
   }).format(date);
 }
 
+/** Last calendar day of YYYY-MM as local YYYY-MM-DD (avoids UTC shift from toISOString). */
+export function getMonthEndDate(monthYear: string): string {
+  const [y, m] = monthYear.split('-').map(Number);
+  const d = new Date(y, m, 0);
+  return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, '0')}-${String(d.getDate()).padStart(2, '0')}`;
+}
+
 /** Most recent month first; only fully completed calendar months (see {@link getLatestCompleteMonthYear}). */
 export function getPreviousMonths(count: number, ref: Date = new Date()): string[] {
   const months: string[] = [];

@@ -32,7 +32,7 @@ function monthKeysBetween(from: string, to: string): string[] {
 }
 
 export default function InsightsPage() {
-  const [rangePreset, setRangePreset] = useState<InsightRangePreset | 'custom'>(12);
+  const [rangePreset, setRangePreset] = useState<InsightRangePreset | 'custom'>(6);
   const [customFrom, setCustomFrom] = useState('');
   const [customTo, setCustomTo] = useState('');
   const [ownerFilter, setOwnerFilter] = useState<InsightOwnerFilter>('total');

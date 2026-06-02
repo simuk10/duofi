@@ -10,14 +10,14 @@ import {
   Input,
   Modal,
 } from '@/components/ui';
-import { ImportProgressRing } from '@/components/gamification/ImportProgressRing';
-import { MonthClosedBadges } from '@/components/gamification/MonthClosedBadges';
+import { ImportNextStep } from '@/components/transactions/ImportNextStep';
 import { useAuth, useTransactions, useCategories, useTags } from '@/hooks';
 import { categoryIconToEmoji } from '@/lib/category-icons';
 import {
   formatCurrency,
   formatDate,
   getMonthYearDisplay,
+  getMonthEndDate,
   getPreviousMonths,
   getLatestCompleteMonthYear,
 } from '@/lib/utils';
@@ -40,9 +40,7 @@ import type { CategoryGuess } from '@/lib/categorization-engine';
 import { HighConfidenceReviewModal } from '@/components/transactions/HighConfidenceReviewModal';
 import { CategorizationMode } from '@/components/transactions/CategorizationMode';
 import { BudgetOwnerReviewMode } from '@/components/transactions/BudgetOwnerReviewMode';
-import { CategorizationWorkflowHub } from '@/components/transactions/CategorizationWorkflowHub';
 import { CoveredSplitModal } from '@/components/covered/CoveredSplitModal';
-import { CoveredSplitSuggestionsBanner } from '@/components/covered/CoveredSplitSuggestionsBanner';
 import { addSavedFriends } from '@/lib/saved-friends';
 import {
   dismissCoveredSuggestion,
@@ -53,7 +51,7 @@ import {
   listCoveredSplitSuggestions,
 } from '@/lib/covered-split-suggestions';
 import Link from 'next/link';
-import { ChevronDown, Lightbulb, Search, Sparkles, Trash2, Upload, Users, X } from 'lucide-react';
+import { ChevronDown, Lightbulb, Search, Trash2, Upload, Users, X } from 'lucide-react';
 import type { Transaction, BudgetOwner, CoveredSplit } from '@/types/database';
 
 type FilterType = 'all' | 'categorized' | 'uncategorized';
@@ -89,6 +87,8 @@ function TransactionsPageContent() {
   const [showHighConfidenceReview, setShowHighConfidenceReview] = useState(false);
   const [showCategorizationMode, setShowCategorizationMode] = useState(false);
   const [showOwnerReview, setShowOwnerReview] = useState(false);
+  const [workflowTargetMonth, setWorkflowTargetMonth] = useState<string | null>(null);
+  const [categorizationAllMonths, setCategorizationAllMonths] = useState(false);
   const [ownerReviewDeferred, setOwnerReviewDeferred] = useState<Set<string>>(
     () => new Set()
   );
@@ -114,10 +114,30 @@ function TransactionsPageContent() {
       filter: 'all',
       monthYear: selectedMonth === '' ? undefined : selectedMonth,
     });
-  const { transactions: allTransactions, refetch: refetchAllTransactions } = useTransactions({
+  const { transactions: allTransactions, loading: allTransactionsLoading, refetch: refetchAllTransactions } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'all',
     enabled: !!household?.id,
+  });
+  const coinMonthKeys = useMemo(() => getPreviousMonths(24), []);
+  const coinStatsRange = useMemo(() => {
+    const sorted = [...coinMonthKeys].sort();
+    return {
+      dateFrom: `${sorted[0]}-01`,
+      dateTo: getMonthEndDate(sorted[sorted.length - 1]),
+    };
+  }, [coinMonthKeys]);
+  const {
+    transactions: coinStatsTransactions,
+    loading: coinStatsLoading,
+    refetch: refetchCoinStatsTransactions,
+  } = useTransactions({
+    householdId: household?.id ?? null,
+    filter: 'all',
+    dateFrom: coinStatsRange.dateFrom,
+    dateTo: coinStatsRange.dateTo,
+    enabled: !!household?.id,
+    skipTags: true,
   });
   const [debouncedSearch, setDebouncedSearch] = useState('');
   const debounceRef = useRef<ReturnType<typeof setTimeout>>(undefined);
@@ -331,45 +351,87 @@ function TransactionsPageContent() {
     ? categories.find((c) => c.id === modalGuess.categoryId)?.name
     : undefined;
 
-  const uncategorizedPool = useMemo(() => {
+  const uncategorizedForMonth = useCallback(
+    (monthYear: string) =>
+      allTransactions.filter(
+        (t) => !t.is_categorized && t.date.slice(0, 7) === monthYear
+      ),
+    [allTransactions]
+  );
+
+  const getHighConfidenceCount = useCallback(
+    (monthYear: string) =>
+      listHighConfidenceTargets(uncategorizedForMonth(monthYear), guessModel).length,
+    [uncategorizedForMonth, guessModel]
+  );
+
+  const getSwipeModeCount = useCallback(
+    (monthYear: string) =>
+      listSwipeModeQueue(uncategorizedForMonth(monthYear), guessModel).length,
+    [uncategorizedForMonth, guessModel]
+  );
+
+  const getOwnerReviewCount = useCallback(
+    (monthYear: string) =>
+      listOwnerReviewQueue(uncategorizedForMonth(monthYear), {
+        excludeIds: ownerReviewDeferred,
+      }).length,
+    [uncategorizedForMonth, ownerReviewDeferred]
+  );
+
+  const getAllSwipeModeCount = useCallback(
+    () =>
+      listSwipeModeQueue(
+        allTransactions.filter((t) => !t.is_categorized),
+        guessModel
+      ).length,
+    [allTransactions, guessModel]
+  );
+
+  const workflowPool = useMemo(() => {
     if (searchActive) {
       return searchResults.filter((t) => !t.is_categorized);
     }
-    return allTransactions.filter((t) => !t.is_categorized);
-  }, [searchActive, searchResults, allTransactions]);
-
-  const uncategorizedInListMonth = useMemo(
-    () => displayTransactions.filter((t) => !t.is_categorized).length,
-    [displayTransactions]
-  );
-
-  const listHiddenByMonth =
-    !searchActive &&
-    selectedMonth !== '' &&
-    uncategorizedPool.length > 0 &&
-    uncategorizedInListMonth === 0;
+    if (categorizationAllMonths) {
+      return allTransactions.filter((t) => !t.is_categorized);
+    }
+    const month = workflowTargetMonth ?? selectedMonth;
+    if (!month) {
+      return allTransactions.filter((t) => !t.is_categorized);
+    }
+    return uncategorizedForMonth(month);
+  }, [
+    searchActive,
+    searchResults,
+    allTransactions,
+    selectedMonth,
+    workflowTargetMonth,
+    categorizationAllMonths,
+    uncategorizedForMonth,
+  ]);
 
   const highConfidenceTargets = useMemo(
-    () => listHighConfidenceTargets(uncategorizedPool, guessModel),
-    [uncategorizedPool, guessModel]
+    () => listHighConfidenceTargets(workflowPool, guessModel),
+    [workflowPool, guessModel]
   );
 
   const swipeModeQueue = useMemo(
-    () => listSwipeModeQueue(uncategorizedPool, guessModel),
-    [uncategorizedPool, guessModel]
+    () => listSwipeModeQueue(workflowPool, guessModel),
+    [workflowPool, guessModel]
   );
 
   const ownerReviewQueue = useMemo(
     () =>
-      listOwnerReviewQueue(uncategorizedPool, {
+      listOwnerReviewQueue(workflowPool, {
         excludeIds: ownerReviewDeferred,
       }),
-    [uncategorizedPool, ownerReviewDeferred]
+    [workflowPool, ownerReviewDeferred]
   );
 
   const refreshAfterCategorize = () => {
     void refetchCategorized();
     void refetchAllTransactions();
+    void refetchCoinStatsTransactions();
     if (globalSearch.trim()) void refetchSearchTransactions();
   };
 
@@ -888,23 +950,45 @@ function TransactionsPageContent() {
         monthOptions={monthOptions}
       />
 
-      <MonthClosedBadges householdId={household?.id ?? null} />
-      <ImportProgressRing
-        householdId={household?.id ?? null}
-        onJumpToMonth={(m) => {
-          setSelectedMonth(m);
-          setFilter('uncategorized');
-        }}
-      />
-
       {!searchActive && !vendorDrilldownActive && (
-        <CoveredSplitSuggestionsBanner
-          suggestions={coveredSplitSuggestions}
-          transactionsById={transactionsById}
-          venmoReviewOnly={venmoReviewOnly}
-          onToggleFilter={() => setVenmoReviewOnly((v) => !v)}
-          onDismiss={handleDismissCoveredSuggestion}
-          onOpenTransaction={handleOpenEdit}
+        <ImportNextStep
+          householdId={household?.id ?? null}
+          selectedMonth={selectedMonth}
+          coinStatsTransactions={coinStatsTransactions}
+          coinStatsLoading={coinStatsLoading}
+          getHighConfidenceCount={getHighConfidenceCount}
+          getSwipeModeCount={getSwipeModeCount}
+          getAllSwipeModeCount={getAllSwipeModeCount}
+          getOwnerReviewCount={getOwnerReviewCount}
+          onSelectMonth={(month) => {
+            setSelectedMonth(month);
+            setFilter('uncategorized');
+          }}
+          onReviewHighConfidence={(month) => {
+            setWorkflowTargetMonth(month);
+            setSelectedMonth(month);
+            setFilter('uncategorized');
+            setShowHighConfidenceReview(true);
+          }}
+          onStartCategorizationMode={(month) => {
+            setCategorizationAllMonths(false);
+            setWorkflowTargetMonth(month);
+            setSelectedMonth(month);
+            setFilter('uncategorized');
+            setShowCategorizationMode(true);
+          }}
+          onStartCategorizationModeAll={() => {
+            setCategorizationAllMonths(true);
+            setWorkflowTargetMonth(null);
+            setFilter('uncategorized');
+            setShowCategorizationMode(true);
+          }}
+          onStartOwnerReview={(month) => {
+            setWorkflowTargetMonth(month);
+            setSelectedMonth(month);
+            setFilter('uncategorized');
+            setShowOwnerReview(true);
+          }}
         />
       )}
 
@@ -934,10 +1018,6 @@ function TransactionsPageContent() {
             </button>
           ) : null}
         </div>
-        <p className="mb-3 text-[10px] leading-snug text-gray-500">
-          Matches description, notes, date, and amount across every imported transaction for your
-          household.
-        </p>
         <div
           className={`flex gap-0.5 rounded-full bg-gray-100 p-1 ${
             searchActive || vendorDrilldownActive ? 'pointer-events-none opacity-40' : ''
@@ -1180,71 +1260,6 @@ function TransactionsPageContent() {
           </div>
         ) : (
           <div className="space-y-3">
-            {highConfidenceTargets.length > 0 && filter !== 'categorized' && (
-              <Card className="border-emerald-200/80 bg-gradient-to-r from-emerald-50/90 to-teal-50/80 p-4">
-                <p className="text-sm font-medium text-gray-900">
-                  {highConfidenceTargets.length} high-confidence suggestion
-                  {highConfidenceTargets.length === 1 ? '' : 's'} ready
-                </p>
-                <p className="mt-1 text-xs text-gray-600">
-                  Review the list before applying — fix any mistakes one-by-one.
-                </p>
-                <Button className="mt-3" onClick={() => setShowHighConfidenceReview(true)}>
-                  Review & apply
-                </Button>
-              </Card>
-            )}
-            {swipeModeQueue.length > 0 && filter !== 'categorized' && (
-              <Card className="border-violet-200/80 bg-gradient-to-r from-violet-50/80 to-fuchsia-50/60 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-violet-100">
-                    <Sparkles className="h-5 w-5 text-violet-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900">
-                      {swipeModeQueue.length} need a category
-                    </p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      Swipe to confirm or fix the suggested category — owners come next.
-                    </p>
-                    <Button
-                      variant="secondary"
-                      size="sm"
-                      className="mt-3"
-                      onClick={() => setShowCategorizationMode(true)}
-                    >
-                      Start categorization mode
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            )}
-            {ownerReviewQueue.length > 0 && filter !== 'categorized' && (
-              <Card className="border-sky-200/80 bg-gradient-to-r from-sky-50/90 to-cyan-50/70 p-4">
-                <div className="flex items-start gap-3">
-                  <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-full bg-sky-100">
-                    <Users className="h-5 w-5 text-sky-600" />
-                  </div>
-                  <div className="min-w-0 flex-1">
-                    <p className="text-sm font-medium text-gray-900">
-                      {ownerReviewQueue.length} need a budget owner
-                    </p>
-                    <p className="mt-1 text-xs text-gray-600">
-                      Swipe → {household?.person_a_name || 'Person A'} · ←{' '}
-                      {household?.person_b_name || 'Person B'} · ↑ Joint · ↓ later
-                    </p>
-                    <Button
-                      variant="outline"
-                      size="sm"
-                      className="mt-3 border-sky-200 bg-white"
-                      onClick={() => setShowOwnerReview(true)}
-                    >
-                      Start owner review
-                    </Button>
-                  </div>
-                </div>
-              </Card>
-            )}
             {visibleTransactions.map((tx) => renderTransactionCard(tx))}
           </div>
         )}
@@ -1647,7 +1662,10 @@ function TransactionsPageContent() {
 
       <HighConfidenceReviewModal
         isOpen={showHighConfidenceReview}
-        onClose={() => setShowHighConfidenceReview(false)}
+        onClose={() => {
+          setShowHighConfidenceReview(false);
+          setWorkflowTargetMonth(null);
+        }}
         targets={highConfidenceTargets}
         categories={categories}
         ownerLabel={ownerLabel}
@@ -1658,7 +1676,11 @@ function TransactionsPageContent() {
 
       <CategorizationMode
         isOpen={showCategorizationMode}
-        onClose={() => setShowCategorizationMode(false)}
+        onClose={() => {
+          setShowCategorizationMode(false);
+          setWorkflowTargetMonth(null);
+          setCategorizationAllMonths(false);
+        }}
         queue={swipeModeQueue}
         categories={categories}
         onCategorize={handleSaveCategoryOnly}
@@ -1667,7 +1689,10 @@ function TransactionsPageContent() {
 
       <BudgetOwnerReviewMode
         isOpen={showOwnerReview}
-        onClose={() => setShowOwnerReview(false)}
+        onClose={() => {
+          setShowOwnerReview(false);
+          setWorkflowTargetMonth(null);
+        }}
         queue={ownerReviewQueue}
         categories={categories}
         personAName={household?.person_a_name || 'Person A'}

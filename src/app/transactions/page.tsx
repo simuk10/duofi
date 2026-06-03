@@ -11,7 +11,13 @@ import {
   Modal,
 } from '@/components/ui';
 import { ImportNextStep } from '@/components/transactions/ImportNextStep';
-import { useAuth, useTransactions, useCategories, useTags } from '@/hooks';
+import {
+  useAuth,
+  useTransactions,
+  useCategories,
+  useTags,
+  useCategorizationFlowMode,
+} from '@/hooks';
 import { categoryIconToEmoji } from '@/lib/category-icons';
 import {
   formatCurrency,
@@ -101,6 +107,7 @@ function TransactionsPageContent() {
   const [venmoReviewOnly, setVenmoReviewOnly] = useState(false);
 
   const { household, profile } = useAuth();
+  const { mode: categorizationFlowMode } = useCategorizationFlowMode();
   const currentUserName =
     profile?.role === 'person_b'
       ? household?.person_b_name
@@ -1683,8 +1690,14 @@ function TransactionsPageContent() {
         }}
         queue={swipeModeQueue}
         categories={categories}
+        workflowMode={categorizationFlowMode}
+        personAName={household?.person_a_name || 'Person A'}
+        personBName={household?.person_b_name || 'Person B'}
         onCategorize={handleSaveCategoryOnly}
-        onComplete={() => setShowOwnerReview(true)}
+        onCategorizeFull={handleSaveCategorization}
+        onComplete={
+          categorizationFlowMode === 'separate' ? () => setShowOwnerReview(true) : undefined
+        }
       />
 
       <BudgetOwnerReviewMode

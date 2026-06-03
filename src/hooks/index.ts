@@ -12,3 +12,4 @@ export { useRepayments } from './useRepayments';
 export { useTransactionMonthStats, buildMonthTransactionStats } from './useTransactionMonthStats';
 export type { MonthTransactionStats } from './useTransactionMonthStats';
 export { useInsightsAggregates } from './useInsightsAggregates';
+export { useCategorizationFlowMode } from './useCategorizationFlowMode';

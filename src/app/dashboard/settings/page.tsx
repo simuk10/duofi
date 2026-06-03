@@ -9,13 +9,20 @@ import {
   Button,
   Input,
 } from '@/components/ui';
-import { useAuth } from '@/hooks';
+import { useAuth, useCategorizationFlowMode } from '@/hooks';
 import { createClient } from '@/lib/supabase/client';
+import {
+  categorizationFlowDescription,
+  categorizationFlowLabel,
+  type CategorizationFlowMode,
+} from '@/lib/categorization-flow-preference';
 import { Copy, Check, CreditCard, Upload, LogOut, ChevronRight } from 'lucide-react';
 import Link from 'next/link';
 
 export default function SettingsPage() {
   const { household, profile, signOut, refreshUserData } = useAuth();
+  const { mode: categorizationFlowMode, setMode: setCategorizationFlowMode } =
+    useCategorizationFlowMode();
   const [personAName, setPersonAName] = useState(household?.person_a_name || '');
   const [personBName, setPersonBName] = useState(household?.person_b_name || '');
   const [householdName, setHouseholdName] = useState(household?.name || '');
@@ -128,6 +135,53 @@ export default function SettingsPage() {
           </Card>
 
           <AllCategoriesSection />
+
+          {/* Categorization workflow */}
+          <Card className="p-5">
+            <h3 className="text-sm text-gray-600 mb-2">Categorization workflow</h3>
+            <p className="text-xs text-gray-500 mb-4">
+              Choose how swipe categorization works. Combined mode updates confidence scores as
+              you finish each transaction.
+            </p>
+            <div className="space-y-2">
+              {(['combined', 'separate'] as CategorizationFlowMode[]).map((option) => {
+                const selected = categorizationFlowMode === option;
+                return (
+                  <button
+                    key={option}
+                    type="button"
+                    onClick={() => setCategorizationFlowMode(option)}
+                    className={`w-full rounded-xl border p-4 text-left transition-colors ${
+                      selected
+                        ? 'border-[#14B8A6] bg-[#14B8A6]/5'
+                        : 'border-gray-200 bg-white hover:border-gray-300'
+                    }`}
+                  >
+                    <div className="flex items-start gap-3">
+                      <span
+                        className={`mt-0.5 flex h-4 w-4 shrink-0 items-center justify-center rounded-full border ${
+                          selected ? 'border-[#14B8A6]' : 'border-gray-300'
+                        }`}
+                        aria-hidden
+                      >
+                        {selected ? (
+                          <span className="h-2 w-2 rounded-full bg-[#14B8A6]" />
+                        ) : null}
+                      </span>
+                      <span>
+                        <span className="block text-sm font-medium text-gray-900">
+                          {categorizationFlowLabel(option)}
+                        </span>
+                        <span className="mt-1 block text-xs text-gray-500">
+                          {categorizationFlowDescription(option)}
+                        </span>
+                      </span>
+                    </div>
+                  </button>
+                );
+              })}
+            </div>
+          </Card>
 
           {/* Manage Split Friends */}
           <Card className="p-5">

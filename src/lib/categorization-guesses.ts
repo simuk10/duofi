@@ -60,7 +60,7 @@ export function listHighConfidenceTargets(
   const out: HighConfidenceTarget[] = [];
 
   for (const tx of transactions) {
-    if (tx.is_categorized || exclude.has(tx.id)) continue;
+    if (tx.is_categorized || tx.category_id || exclude.has(tx.id)) continue;
     const guess = predictCategory(tx, model);
     if (guess.confidence >= min) {
       out.push({ transaction: tx, guess });
@@ -119,7 +119,11 @@ export function listSwipeModeQueue(
     }
   }
 
-  // Medium-confidence first, then low, then wild guesses
-  out.sort((a, b) => b.guess.confidence - a.guess.confidence);
+  // Oldest first so users work through transactions in chronological order
+  out.sort(
+    (a, b) =>
+      a.transaction.date.localeCompare(b.transaction.date) ||
+      a.transaction.id.localeCompare(b.transaction.id)
+  );
   return out;
 }

@@ -115,13 +115,23 @@ function TransactionsPageContent() {
   const { tags: householdTags, createTag } = useTags({
     householdId: household?.id ?? null,
   });
-  const { transactions, loading, updateTransaction, bulkUpdateTransactions, deleteTransaction, replaceTransactionTags } =
-    useTransactions({
-      householdId: household?.id ?? null,
-      filter: 'all',
-      monthYear: selectedMonth === '' ? undefined : selectedMonth,
-    });
-  const { transactions: allTransactions, loading: allTransactionsLoading, refetch: refetchAllTransactions } = useTransactions({
+  const {
+    transactions,
+    loading,
+    bulkUpdateTransactions,
+    deleteTransaction,
+    replaceTransactionTags,
+  } = useTransactions({
+    householdId: household?.id ?? null,
+    filter: 'all',
+    monthYear: selectedMonth === '' ? undefined : selectedMonth,
+  });
+  const {
+    transactions: allTransactions,
+    loading: allTransactionsLoading,
+    updateTransaction,
+    refetch: refetchAllTransactions,
+  } = useTransactions({
     householdId: household?.id ?? null,
     filter: 'all',
     enabled: !!household?.id,
@@ -435,11 +445,18 @@ function TransactionsPageContent() {
     [workflowPool, ownerReviewDeferred]
   );
 
-  const refreshAfterCategorize = () => {
-    void refetchCategorized();
-    void refetchAllTransactions();
-    void refetchCoinStatsTransactions();
-    if (globalSearch.trim()) void refetchSearchTransactions();
+  const refreshAfterCategorize = async () => {
+    await Promise.all([
+      refetchCategorized(),
+      refetchAllTransactions(),
+      refetchCoinStatsTransactions(),
+      globalSearch.trim() ? refetchSearchTransactions() : Promise.resolve(),
+    ]);
+  };
+
+  /** Swipe mode: don't block the next card on full-table refetches. */
+  const refreshAfterCategorizeInBackground = () => {
+    void refreshAfterCategorize();
   };
 
   const ownerLabel = (o: BudgetOwner) =>
@@ -503,7 +520,19 @@ function TransactionsPageContent() {
       category_id: payload.category_id,
       budget_owner: payload.budget_owner,
     });
-    refreshAfterCategorize();
+    await refreshAfterCategorize();
+  };
+
+  const handleSwipeSaveCategorization = async (payload: {
+    id: string;
+    category_id: string;
+    budget_owner: BudgetOwner;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+      budget_owner: payload.budget_owner,
+    });
+    refreshAfterCategorizeInBackground();
   };
 
   const handleSaveCategoryOnly = async (payload: {
@@ -513,7 +542,41 @@ function TransactionsPageContent() {
     await updateTransaction(payload.id, {
       category_id: payload.category_id,
     });
-    refreshAfterCategorize();
+    await refreshAfterCategorize();
+  };
+
+  const handleSwipeSaveCategoryOnly = async (payload: {
+    id: string;
+    category_id: string;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+    });
+    refreshAfterCategorizeInBackground();
+  };
+
+  const handleRevertCategorization = async (payload: {
+    id: string;
+    category_id: string | null;
+    budget_owner: BudgetOwner | null;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+      budget_owner: payload.budget_owner,
+    });
+    await refreshAfterCategorize();
+  };
+
+  const handleSwipeRevertCategorization = async (payload: {
+    id: string;
+    category_id: string | null;
+    budget_owner: BudgetOwner | null;
+  }) => {
+    await updateTransaction(payload.id, {
+      category_id: payload.category_id,
+      budget_owner: payload.budget_owner,
+    });
+    refreshAfterCategorizeInBackground();
   };
 
   const handleAssignOwner = async (payload: {
@@ -1687,14 +1750,16 @@ function TransactionsPageContent() {
           setShowCategorizationMode(false);
           setWorkflowTargetMonth(null);
           setCategorizationAllMonths(false);
+          void refreshAfterCategorize();
         }}
         queue={swipeModeQueue}
         categories={categories}
         workflowMode={categorizationFlowMode}
         personAName={household?.person_a_name || 'Person A'}
         personBName={household?.person_b_name || 'Person B'}
-        onCategorize={handleSaveCategoryOnly}
-        onCategorizeFull={handleSaveCategorization}
+        onCategorize={handleSwipeSaveCategoryOnly}
+        onCategorizeFull={handleSwipeSaveCategorization}
+        onRevert={handleSwipeRevertCategorization}
         onComplete={
           categorizationFlowMode === 'separate' ? () => setShowOwnerReview(true) : undefined
         }

@@ -13,6 +13,10 @@ import {
   X,
 } from 'lucide-react';
 import type { BudgetOwner, Category, Transaction } from '@/types/database';
+import {
+  computeOwnerSwipeFeedback,
+  OWNER_SWIPE_THRESHOLD,
+} from '@/components/transactions/owner-swipe-feedback';
 
 interface BudgetOwnerReviewModeProps {
   isOpen: boolean;
@@ -24,8 +28,6 @@ interface BudgetOwnerReviewModeProps {
   onAssignOwner: (payload: { id: string; budget_owner: BudgetOwner }) => Promise<void>;
   onDefer: (id: string) => void;
 }
-
-const SWIPE_THRESHOLD = 72;
 
 export function BudgetOwnerReviewMode({
   isOpen,
@@ -101,14 +103,14 @@ export function BudgetOwnerReviewMode({
   const resolveSwipe = useCallback(() => {
     const ax = Math.abs(dragX);
     const ay = Math.abs(dragY);
-    if (ax < SWIPE_THRESHOLD && ay < SWIPE_THRESHOLD) return;
+    if (ax < OWNER_SWIPE_THRESHOLD && ay < OWNER_SWIPE_THRESHOLD) return;
 
     if (ax >= ay) {
-      if (dragX > SWIPE_THRESHOLD) void assignAndAdvance('person_a');
-      else if (dragX < -SWIPE_THRESHOLD) void assignAndAdvance('person_b');
+      if (dragX > OWNER_SWIPE_THRESHOLD) void assignAndAdvance('person_a');
+      else if (dragX < -OWNER_SWIPE_THRESHOLD) void assignAndAdvance('person_b');
     } else {
-      if (dragY < -SWIPE_THRESHOLD) void assignAndAdvance('joint');
-      else if (dragY > SWIPE_THRESHOLD) deferAndAdvance();
+      if (dragY < -OWNER_SWIPE_THRESHOLD) void assignAndAdvance('joint');
+      else if (dragY > OWNER_SWIPE_THRESHOLD) deferAndAdvance();
     }
   }, [assignAndAdvance, deferAndAdvance, dragX, dragY]);
 
@@ -125,7 +127,7 @@ export function BudgetOwnerReviewMode({
   const handlePointerUp = () => {
     resolveSwipe();
     setPointerOrigin(null);
-    if (Math.abs(dragX) < SWIPE_THRESHOLD && Math.abs(dragY) < SWIPE_THRESHOLD) {
+    if (Math.abs(dragX) < OWNER_SWIPE_THRESHOLD && Math.abs(dragY) < OWNER_SWIPE_THRESHOLD) {
       setDragX(0);
       setDragY(0);
     }
@@ -155,11 +157,10 @@ export function BudgetOwnerReviewMode({
   }
 
   const tx = current;
-  const cardRotate = Math.max(-10, Math.min(10, dragX / 24));
-  const personAOpacity = Math.min(1, Math.max(0, dragX / SWIPE_THRESHOLD));
-  const personBOpacity = Math.min(1, Math.max(0, -dragX / SWIPE_THRESHOLD));
-  const jointOpacity = Math.min(1, Math.max(0, -dragY / SWIPE_THRESHOLD));
-  const laterOpacity = Math.min(1, Math.max(0, dragY / SWIPE_THRESHOLD));
+  const swipe = computeOwnerSwipeFeedback(dragX, dragY, {
+    personAName,
+    personBName,
+  });
 
   return (
     <div className="fixed inset-0 z-50 flex flex-col bg-gradient-to-b from-sky-50/80 to-white">
@@ -184,38 +185,47 @@ export function BudgetOwnerReviewMode({
       </header>
 
       <div className="flex flex-1 flex-col items-center justify-center px-4 pb-8 pt-2">
-        <div className="relative mb-4 w-full max-w-sm aspect-[4/5] max-h-[420px]">
-          {/* Direction hints */}
+        <div className="relative mb-6 w-full max-w-sm">
           <div
-            className="pointer-events-none absolute left-1/2 top-2 z-10 -translate-x-1/2 rounded-lg border-2 border-violet-300 bg-violet-50 px-3 py-1 text-xs font-semibold text-violet-700"
-            style={{ opacity: jointOpacity }}
+            className="pointer-events-none absolute inset-0 z-10 flex flex-col justify-between py-1"
+            aria-hidden
           >
-            Joint ↑
-          </div>
-          <div
-            className="pointer-events-none absolute bottom-2 left-1/2 z-10 -translate-x-1/2 rounded-lg border-2 border-gray-300 bg-gray-100 px-3 py-1 text-xs font-semibold text-gray-600"
-            style={{ opacity: laterOpacity }}
-          >
-            Later ↓
-          </div>
-          <div
-            className="pointer-events-none absolute left-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
-            style={{ opacity: personBOpacity }}
-          >
-            {personBName}
-          </div>
-          <div
-            className="pointer-events-none absolute right-2 top-1/2 z-10 -translate-y-1/2 rounded-lg border-2 border-blue-300 bg-blue-50 px-2 py-1 text-xs font-semibold text-blue-800"
-            style={{ opacity: personAOpacity }}
-          >
-            {personAName}
+            <span
+              className="mx-auto rounded-lg border-2 border-violet-300 bg-violet-50 px-3 py-1 text-sm font-semibold text-violet-700"
+              style={{ opacity: swipe.jointOpacity }}
+            >
+              Joint ↑
+            </span>
+            <div className="flex items-center justify-between px-4 pt-8">
+              <span
+                className="rounded-lg border-2 border-blue-300 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-800"
+                style={{ opacity: swipe.personBOpacity }}
+              >
+                {personBName}
+              </span>
+              <span
+                className="rounded-lg border-2 border-blue-300 bg-blue-50 px-3 py-1 text-sm font-semibold text-blue-800"
+                style={{ opacity: swipe.personAOpacity }}
+              >
+                {personAName}
+              </span>
+            </div>
+            <span
+              className="mx-auto rounded-lg border-2 border-gray-300 bg-gray-100 px-3 py-1 text-sm font-semibold text-gray-600"
+              style={{ opacity: swipe.laterOpacity }}
+            >
+              Later ↓
+            </span>
           </div>
 
           <div
-            className="absolute inset-x-4 top-12 bottom-12 rounded-2xl border border-gray-200 bg-white p-5 shadow-xl touch-none select-none"
+            className="relative overflow-hidden rounded-2xl border-2 bg-white p-5 shadow-lg touch-none select-none"
             style={{
-              transform: `translate(${dragX}px, ${dragY}px) rotate(${cardRotate}deg)`,
+              transform: `translate(${dragX}px, ${dragY}px) rotate(${swipe.cardRotate}deg) scale(${swipe.cardScale})`,
               transition: pointerOrigin === null ? 'transform 0.2s ease-out' : 'none',
+              backgroundColor: swipe.cardBg,
+              borderColor: swipe.cardBorder,
+              boxShadow: swipe.cardShadow,
             }}
             onTouchStart={(e) =>
               handlePointerDown(e.touches[0].clientX, e.touches[0].clientY)

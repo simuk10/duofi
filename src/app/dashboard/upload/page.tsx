@@ -84,6 +84,7 @@ export default function UploadPage() {
   });
   const { importTransactions, importCategorizedTransactions } = useTransactions({
     householdId: household?.id ?? null,
+    enabled: false,
   });
   const { refetch: refetchCardImports, isCardCoveredForMonth } = useCardImports({
     householdId: household?.id ?? null,

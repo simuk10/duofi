@@ -74,27 +74,38 @@ export async function duplicateSamplesForRows(
   rows: { date: string; amount: number; description: string }[],
   maxSamples: number
 ): Promise<{ count: number; samples: { date: string; description: string; amount: number }[] }> {
-  const { data: existing, error } = await supabase
-    .from('transactions')
-    .select('date, description, amount')
-    .eq('household_id', householdId)
-    .eq('credit_card_id', creditCardId)
-    .gte('date', dateFrom)
-    .lte('date', dateTo);
+  const monthYms = new Set<string>();
+  for (const r of rows) {
+    const ym = r.date.slice(0, 7);
+    if (/^\d{4}-\d{2}$/.test(ym)) monthYms.add(ym);
+  }
+  if (monthYms.size === 0) {
+    monthYms.add(dateFrom.slice(0, 7));
+  }
 
-  if (error) throw error;
+  const existingSet = new Set<string>();
+  for (const monthYm of monthYms) {
+    const bounds = calendarMonthBounds(monthYm);
+    const { data: existing, error } = await supabase
+      .from('transactions')
+      .select('date, description, amount')
+      .eq('household_id', householdId)
+      .eq('credit_card_id', creditCardId)
+      .gte('date', bounds.dateFrom)
+      .lte('date', bounds.dateTo);
 
-  const existingRows = (existing ?? []) as {
-    date: string;
-    amount: number | string;
-    description: string;
-  }[];
+    if (error) throw error;
 
-  const existingSet = new Set(
-    existingRows.map((t) =>
-      transactionFingerprint(t.date, Number(t.amount), t.description)
-    )
-  );
+    for (const t of (existing ?? []) as {
+      date: string;
+      amount: number | string;
+      description: string;
+    }[]) {
+      existingSet.add(
+        transactionFingerprint(t.date, Number(t.amount), t.description)
+      );
+    }
+  }
 
   const samples: { date: string; description: string; amount: number }[] = [];
   let count = 0;

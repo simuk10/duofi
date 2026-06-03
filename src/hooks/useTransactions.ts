@@ -40,31 +40,36 @@ async function loadTagsForTransactions(
   const byTx = new Map<string, Tag[]>();
   if (transactionIds.length === 0) return byTx;
 
-  const { data, error } = await supabase
-    .from('transaction_tags')
-    .select('transaction_id, tags(*)')
-    .in('transaction_id', transactionIds);
-
-  if (error) {
-    console.warn(
-      '[transactions] Could not load tags (add migration 006_transaction_tags.sql if you use tags):',
-      error.message
-    );
-    return byTx;
-  }
-
+  const CHUNK = 200;
   type Row = {
     transaction_id: string;
     tags?: Tag | null;
     tag?: Tag | null;
   };
-  for (const row of (data ?? []) as unknown as Row[]) {
-    const tag = row.tags ?? row.tag;
-    if (!tag || typeof tag !== 'object' || !('id' in tag)) continue;
-    const tid = row.transaction_id;
-    const list = byTx.get(tid) ?? [];
-    list.push(tag as Tag);
-    byTx.set(tid, list);
+
+  for (let i = 0; i < transactionIds.length; i += CHUNK) {
+    const chunk = transactionIds.slice(i, i + CHUNK);
+    const { data, error } = await supabase
+      .from('transaction_tags')
+      .select('transaction_id, tags(*)')
+      .in('transaction_id', chunk);
+
+    if (error) {
+      console.warn(
+        '[transactions] Could not load tags (add migration 006_transaction_tags.sql if you use tags):',
+        error.message
+      );
+      return byTx;
+    }
+
+    for (const row of (data ?? []) as unknown as Row[]) {
+      const tag = row.tags ?? row.tag;
+      if (!tag || typeof tag !== 'object' || !('id' in tag)) continue;
+      const tid = row.transaction_id;
+      const list = byTx.get(tid) ?? [];
+      list.push(tag as Tag);
+      byTx.set(tid, list);
+    }
   }
   return byTx;
 }
@@ -384,17 +389,20 @@ export function useTransactions({
   ) => {
     if (!householdId) throw new Error('No household');
 
-    const { error: insertError } = await supabase.from('transactions').insert(
-      transactions.map((t) => ({
-        ...t,
-        credit_card_id: creditCardId,
-        paid_by: paidBy,
-        household_id: householdId,
-        is_categorized: false,
-      }))
-    );
+    const rows = transactions.map((t) => ({
+      ...t,
+      credit_card_id: creditCardId,
+      paid_by: paidBy,
+      household_id: householdId,
+      is_categorized: false,
+    }));
 
-    if (insertError) throw insertError;
+    const BATCH_SIZE = 500;
+    for (let i = 0; i < rows.length; i += BATCH_SIZE) {
+      const batch = rows.slice(i, i + BATCH_SIZE);
+      const { error: insertError } = await supabase.from('transactions').insert(batch);
+      if (insertError) throw insertError;
+    }
 
     if (meta?.fileHash && transactions.length > 0) {
       const importRows = buildCardImportLogRowsForCard(
@@ -407,9 +415,6 @@ export function useTransactions({
         .insert(importRows as never);
       if (importLogError) throw importLogError;
     }
-
-    // Refresh to get the complete data with joins
-    await fetchTransactions();
   };
 
   const importCategorizedTransactions = async (
@@ -525,8 +530,6 @@ export function useTransactions({
         if (importLogError) throw importLogError;
       }
     }
-
-    await fetchTransactions();
   };
 
   const replaceTransactionTags = useCallback(
